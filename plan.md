@@ -24,7 +24,7 @@
 
 | ID | 任务 | Assignee | Status | 验收标准 | PR / Commit |
 |---|---|---|---|---|---|
-| PIA-000 | 初始化本地 Git 仓库、连接 `origin` 并推送当前协作文档。 | Michael | In Progress | `main` 跟踪 GitHub 远程；仅提交项目文档和 Git 忽略规则；远程状态经 push 验证。 | — |
+| PIA-000 | 初始化本地 Git 仓库、连接 `origin` 并推送当前协作文档。 | Michael | Blocked | 本地 `main` 已初始化并有初始提交；推送因当前环境无法连接 `github.com:443` 被阻塞。网络恢复后执行 `git push -u origin main` 并记录远程验证结果。 | `1b2b95e` |
 | PIA-001 | 验证 Pi extension 能否注册顶层 `pi app`，并确定受支持的启动入口。 | Unassigned | Todo | 最小 package 与自动化测试证明入口行为；若不支持，记录 `/app` 或独立 `pi-app` bin 的最终决策。 | — |
 | PIA-002 | 初始化 monorepo、Tauri 2 + React + TypeScript 工程和基础 CI。 | Unassigned | Todo | `lint`、`typecheck`、前端测试、Rust `fmt`/`clippy`/测试命令可在 clean checkout 执行。依赖 PIA-001。 | — |
 | PIA-003 | 实现并测试 TypeScript launcher 的平台二进制解析与 cwd 传递。 | Unassigned | Todo | 覆盖 OS/arch 映射、缺失 binary 的明确错误、启动参数和 cwd；依赖 PIA-001、PIA-002。 | — |
