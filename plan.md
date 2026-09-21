@@ -6,8 +6,7 @@
 
 - **仓库**：https://github.com/shengxiao20/pi-app
 - **参与者**：`Michael`、`Collaborator`（第二位参与者 GitHub 用户名待填写）
-- **最后一次远程核对**：未完成；当前工作目录不是 Git checkout，且对远程的 `git ls-remote` 请求于 2026-09-21 超时。
-- **当前任务**：无。开始开发前，领取下方一个 `Todo` 任务并改为 `In Progress`。
+- **当前任务**：无；PIA-001 已在本地验收完成，待创建 commit/PR 后补充关联记录。
 
 ### 状态定义
 
@@ -25,7 +24,7 @@
 | ID | 任务 | Assignee | Status | 验收标准 | PR / Commit |
 |---|---|---|---|---|---|
 | PIA-000 | 初始化本地 Git 仓库、连接 `origin` 并推送当前协作文档。 | Michael | Done | 本地 `main`、`origin` 与初始协作文档已创建；Michael 已手动推送至 GitHub。 | `1b2b95e`, `d88317b` |
-| PIA-001 | 验证 Pi extension 能否注册顶层 `pi app`，并确定受支持的启动入口。 | Unassigned | Todo | 最小 package 与自动化测试证明入口行为；若不支持，记录 `/app` 或独立 `pi-app` bin 的最终决策。 | — |
+| PIA-001 | 验证 Pi extension 能否注册顶层 `pi app`，并确定受支持的启动入口。 | Michael | Done | 已建立最小 `pi-app` package；`pi -e .` 在 RPC `get_commands` 中公开 `/app`，且 `pi --help` 不公开顶层 `app`。最终入口为交互会话 `/app`。Evidence: `npm test`（3 passed）, `npm pack --dry-run --json`, `git diff --check`。 | Local changes pending commit/PR |
 | PIA-002 | 初始化 monorepo、Tauri 2 + React + TypeScript 工程和基础 CI。 | Unassigned | Todo | `lint`、`typecheck`、前端测试、Rust `fmt`/`clippy`/测试命令可在 clean checkout 执行。依赖 PIA-001。 | — |
 | PIA-003 | 实现并测试 TypeScript launcher 的平台二进制解析与 cwd 传递。 | Unassigned | Todo | 覆盖 OS/arch 映射、缺失 binary 的明确错误、启动参数和 cwd；依赖 PIA-001、PIA-002。 | — |
 | PIA-004 | 实现并测试 Rust JSONL RPC protocol 与 Pi 子进程 supervisor。 | Unassigned | Todo | 覆盖 LF 分帧、请求 ID 关联、流式事件、异常退出和明确错误；依赖 PIA-002。 | — |
@@ -66,12 +65,13 @@ Blocker: <具体外部依赖、错误或待决策事项>
 
 ```bash
 pi install npm:pi-app
-pi app
+# 在 Pi 交互会话中执行：
+/app
 ```
 
 桌面应用是 Pi CLI 的图形客户端，不重写 Pi Agent、provider、tool 或 session 系统。
 
-> **待验证前提（PIA-001）**：Pi extension 是否支持向顶层 CLI 注册裸子命令 `pi app`。若不支持，官方且可行的入口是交互会话中的 `/app`。不得通过覆盖全局 `pi` 可执行文件或 PATH 劫持来伪造该能力。
+> **PIA-001 结论（2026-09-21）**：Pi extension 无法注册顶层 CLI 裸子命令 `pi app`。`pi.registerCommand("app", …)` 的受支持入口是交互会话中的 `/app`；Pi `--help` 的顶层命令列表不含 `app`。不得通过覆盖全局 `pi` 可执行文件或 PATH 劫持来伪造该能力。
 
 ### MVP（P0）
 
@@ -123,7 +123,7 @@ pi --mode rpc
 Tauri Rust 后端负责启动与监管该子进程；UI 只消费 Pi 返回的权威事件流。
 
 ```text
-用户执行 pi app
+用户在 Pi 交互会话中执行 /app
         │
         ▼
 npm 包内的 Pi Extension（TypeScript）
@@ -143,7 +143,7 @@ Pi Agent / providers / tools / sessions
 ## 5. 架构与职责边界
 
 ```text
-pi app
+/app
 └── extensions/app.ts
     └── launcher.startDesktopClient()
         └── pi-app-{platform}-{arch} binary
@@ -331,5 +331,6 @@ windows-latest → win32-x64-msvc
 
 - Pi package 支持 `pi install npm:<package>`。
 - package 可通过 `package.json` 的 `pi.extensions` 声明 TypeScript/JavaScript extension。
+- Pi 0.86.1 的 extension API `pi.registerCommand("app", …)` 注册交互式 slash command `/app`，不能注册顶层 CLI 子命令 `pi app`；`tests/extension/entrypoint.test.mjs` 以 RPC `get_commands` 和 `pi --help` 自动验证该结论。
 - Pi RPC mode 是为嵌入自定义 UI 而设计的 JSON stdin/stdout 协议，适合作为桌面客户端和 Pi Agent 的通信层。
 - 当前工作区最初为空；CodeGraph 已初始化。
