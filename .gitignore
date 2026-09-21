@@ -1,0 +1,19 @@
+# CodeGraph index (local tool state)
+.codegraph/
+
+# Node dependencies and package output
+node_modules/
+dist/
+coverage/
+
+# Rust and Tauri build output
+target/
+desktop/src-tauri/target/
+
+# Environment and local editor state
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
