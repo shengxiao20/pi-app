@@ -24,7 +24,7 @@
 | ID | 任务 | Assignee | Status | 验收标准 | PR / Commit |
 |---|---|---|---|---|---|
 | PIA-000 | 初始化本地 Git 仓库、连接 `origin` 并推送当前协作文档。 | Michael | Done | 本地 `main`、`origin` 与初始协作文档已创建；Michael 已手动推送至 GitHub。 | `1b2b95e`, `d88317b` |
-| PIA-001 | 验证 Pi extension 能否注册顶层 `pi app`，并确定受支持的启动入口。 | Michael | Done | 已建立最小 `pi-app` package；`pi -e .` 在 RPC `get_commands` 中公开 `/app`，且 `pi --help` 不公开顶层 `app`。最终入口为交互会话 `/app`。Evidence: `npm test`（3 passed）, `npm pack --dry-run --json`, `git diff --check`。 | Local changes pending commit/PR |
+| PIA-001 | 验证 Pi extension 能否注册顶层 `pi app`，并确定受支持的启动入口。 | Michael | Done | 已建立最小 `pi-app` package；`pi -e .` 在 RPC `get_commands` 中公开 `/app`，且 `pi --help` 不公开顶层 `app`。最终入口为交互会话 `/app`。Evidence: `npm test`（3 passed）, `npm pack --dry-run --json`, `git diff --check`。 | [#2](https://github.com/shengxiao20/pi-app/pull/2) / `91e6f1d` |
 | PIA-002 | 初始化 monorepo、Tauri 2 + React + TypeScript 工程和基础 CI。 | Unassigned | Todo | `lint`、`typecheck`、前端测试、Rust `fmt`/`clippy`/测试命令可在 clean checkout 执行。依赖 PIA-001。 | — |
 | PIA-003 | 实现并测试 TypeScript launcher 的平台二进制解析与 cwd 传递。 | Unassigned | Todo | 覆盖 OS/arch 映射、缺失 binary 的明确错误、启动参数和 cwd；依赖 PIA-001、PIA-002。 | — |
 | PIA-004 | 实现并测试 Rust JSONL RPC protocol 与 Pi 子进程 supervisor。 | Unassigned | Todo | 覆盖 LF 分帧、请求 ID 关联、流式事件、异常退出和明确错误；依赖 PIA-002。 | — |
