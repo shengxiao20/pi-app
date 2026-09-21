@@ -6,7 +6,7 @@
 
 - **仓库**：https://github.com/shengxiao20/pi-app
 - **参与者**：`Michael`、`Collaborator`（第二位参与者 GitHub 用户名待填写）
-- **当前任务**：无；PIA-001 已在本地验收完成，待创建 commit/PR 后补充关联记录。
+- **当前任务**：PIA-010（Michael，In Progress）。将已验收的桌面客户端 prototype 推送至 `feat/app-prototype-complete` 并创建 PR。
 
 ### 状态定义
 
@@ -25,13 +25,13 @@
 |---|---|---|---|---|---|
 | PIA-000 | 初始化本地 Git 仓库、连接 `origin` 并推送当前协作文档。 | Michael | Done | 本地 `main`、`origin` 与初始协作文档已创建；Michael 已手动推送至 GitHub。 | `1b2b95e`, `d88317b` |
 | PIA-001 | 验证 Pi extension 能否注册顶层 `pi app`，并确定受支持的启动入口。 | Michael | Done | 已建立最小 `pi-app` package；`pi -e .` 在 RPC `get_commands` 中公开 `/app`，且 `pi --help` 不公开顶层 `app`。最终入口为交互会话 `/app`。Evidence: `npm test`（3 passed）, `npm pack --dry-run --json`, `git diff --check`。 | [#2](https://github.com/shengxiao20/pi-app/pull/2) / `91e6f1d` |
-| PIA-002 | 初始化 monorepo、Tauri 2 + React + TypeScript 工程和基础 CI。 | Unassigned | Todo | `lint`、`typecheck`、前端测试、Rust `fmt`/`clippy`/测试命令可在 clean checkout 执行。依赖 PIA-001。 | — |
-| PIA-003 | 实现并测试 TypeScript launcher 的平台二进制解析与 cwd 传递。 | Unassigned | Todo | 覆盖 OS/arch 映射、缺失 binary 的明确错误、启动参数和 cwd；依赖 PIA-001、PIA-002。 | — |
-| PIA-004 | 实现并测试 Rust JSONL RPC protocol 与 Pi 子进程 supervisor。 | Unassigned | Todo | 覆盖 LF 分帧、请求 ID 关联、流式事件、异常退出和明确错误；依赖 PIA-002。 | — |
-| PIA-005 | 实现并测试 Tauri RPC command/event bridge 与 fake-Pi 集成环境。 | Unassigned | Todo | `start_agent`、`send_rpc`、`abort_agent` 可由 fake Pi 端到端验证；依赖 PIA-004。 | — |
-| PIA-006 | 实现并测试 P0 聊天 UI 状态机与流式消息/工具调用渲染。 | Unassigned | Todo | `idle → starting → ready → streaming → idle`、abort 与 failed 状态有单元测试；依赖 PIA-005。 | — |
-| PIA-007 | 实现 npm root package、平台 optional-dependency 包及 `npm pack` 安装 smoke test。 | Unassigned | Todo | `pi install <tarball>` 后可启动受支持入口，且二进制缺失不静默降级；依赖 PIA-003、PIA-006。 | — |
-| PIA-008 | 建立三平台发布流水线与 clean-install/RPC-handshake smoke test。 | Unassigned | Todo | macOS arm64/x64、Linux x64、Windows x64 构建矩阵和发布顺序经过 CI 验证；依赖 PIA-007。 | — |
+| PIA-002 | 初始化 monorepo、Tauri 2 + React + TypeScript 工程和基础 CI。 | Michael | Done | npm workspace 下的 React/Vite 前端、Tauri 2 Rust crate 与 GitHub Actions CI 已建立。Evidence: `npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:frontend && npm run rust:fmt && npm run rust:clippy && npm run rust:test && git diff --check` 全部通过（前端 1、extension 3、Rust 1 测试）。 | 本地 commit 待创建 |
+| PIA-003 | 实现并测试 TypeScript launcher 的平台二进制解析与 cwd 传递。 | Michael | Done | 支持 darwin arm64/x64、linux x64、win32 x64 的 optional package 映射；不支持平台和缺失 binary 明确报错；`/app` 以 Pi command context cwd、detached 和 ignore stdio 启动并 `unref`。Evidence: 4 launcher tests，完整质量门禁通过（root 7、frontend 1、Rust 1 测试）。 | 本地 commit 待创建 |
+| PIA-004 | 实现并测试 Rust JSONL RPC protocol 与 Pi 子进程 supervisor。 | Michael | Done | 严格按 LF JSONL 解帧（兼容 CRLF、保留不完整帧）、按 response `id` 关联请求并转发流式 event；无效 JSON 与异常退出明确报错，退出时释放 pending request。Evidence: Rust protocol/supervisor 7 个测试 + crate test 1 个；完整质量门禁通过。 | 本地 commit 待创建 |
+| PIA-005 | 实现并测试 Tauri RPC command/event bridge 与 fake-Pi 集成环境。 | Michael | Done | 固定启动 `pi --mode rpc`（WebView 不能控制 executable/cwd）；提供 `start_agent`、`send_rpc`、`abort_agent` command，未关联 JSONL record 通过 `pi-rpc-event` 转发。fake Pi 验证 prompt response、message_update 和 abort；Rust 10 tests 通过。 | 本地 commit 待创建 |
+| PIA-006 | 实现并测试 P0 聊天 UI 状态机与流式消息/工具调用渲染。 | Michael | Done | React UI 通过 Tauri client 调用 `start_agent`/`send_rpc`/`abort_agent` 并监听 `pi-rpc-event`；验证 `idle → starting → ready → streaming → idle`、abort、启动失败、流式文本和工具输出。Evidence: 3 Vitest tests，desktop production build、typecheck、lint 通过。 | 本地 commit 待创建 |
+| PIA-007 | 实现 npm root package、平台 optional-dependency 包及 `npm pack` 安装 smoke test。 | Michael | Done | root 发布包编译 launcher 为 JS、通过 optional/bundled `pi-app-darwin-arm64` 分发完整 Tauri `.app` 和 shim；clean `npm install` smoke 验证 extension registry、launcher binary resolution。真实 Pi RPC `/app` 返回 success 并启动 installed `.app`；打包 UI 截图验证 `ready`。其他平台构建矩阵留给 PIA-008。Evidence: root 8 tests（含 clean-install packaging）、frontend 4、Rust 10、Tauri macOS bundle 与完整质量门禁通过。 | 本地 commit 待创建 |
+| PIA-010 | 发布已验收的 desktop app prototype 至新 feature branch 并创建 PR。 | Michael | In Progress | `feat/app-prototype-complete` 包含 PIA-002 至 PIA-009 的已验收变更，远端 branch 与 PR 创建成功，PR 描述包含测试证据和平台限制。 | — |
 
 ### 任务更新格式
 

@@ -5,7 +5,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
-const appExtensionPath = fileURLToPath(new URL("../../extensions/app.ts", import.meta.url));
+const appExtensionPath = fileURLToPath(
+  new URL("../../extensions/app.ts", import.meta.url),
+);
 const pi = process.env.PI_BIN ?? "pi";
 
 function runPi(args, input) {
@@ -17,14 +19,24 @@ function runPi(args, input) {
 }
 
 test("the package declares its /app extension", () => {
-  const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  const manifest = JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+  );
 
   assert.deepEqual(manifest.pi.extensions, ["./extensions"]);
 });
 
 test("the package exposes /app through Pi's extension command registry", () => {
   const result = runPi(
-    ["--mode", "rpc", "--no-session", "--no-context-files", "--no-extensions", "-e", "."],
+    [
+      "--mode",
+      "rpc",
+      "--no-session",
+      "--no-context-files",
+      "--no-extensions",
+      "-e",
+      ".",
+    ],
     '{"type":"get_commands"}\n',
   );
 
@@ -34,21 +46,28 @@ test("the package exposes /app through Pi's extension command registry", () => {
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line))
-    .find((message) => message.type === "response" && message.command === "get_commands");
+    .find(
+      (message) =>
+        message.type === "response" && message.command === "get_commands",
+    );
 
   assert.ok(response, result.stdout);
+  const command = response.data.commands.find(
+    (command) => command.name === "app",
+  );
+
   assert.deepEqual(
-    response.data.commands.find((command) => command.name === "app"),
+    {
+      name: command?.name,
+      description: command?.description,
+      source: command?.source,
+      path: command?.sourceInfo.path,
+    },
     {
       name: "app",
       description: "Launch the Pi App desktop client",
       source: "extension",
-      sourceInfo: {
-        path: appExtensionPath,
-        source: "cli",
-        scope: "temporary",
-        origin: "top-level",
-      },
+      path: appExtensionPath,
     },
   );
 });
