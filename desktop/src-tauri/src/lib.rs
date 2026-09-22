@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod rpc;
+pub mod workspace;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,7 +13,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::start_agent,
             commands::send_rpc,
-            commands::abort_agent
+            commands::abort_agent,
+            commands::load_workspace,
+            commands::create_project,
+            commands::rename_project,
+            commands::delete_project,
+            commands::delete_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pi App desktop client");

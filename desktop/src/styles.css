@@ -136,12 +136,44 @@ textarea:disabled {
   text-transform: uppercase;
 }
 
-.project-note {
+.project-create,
+.project-item button,
+.session-actions button {
+  background: transparent;
+  border: 1px solid #bdbbb5;
+  color: #4a5664;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  padding: 4px 5px;
+  text-transform: uppercase;
+}
+
+.project-create:hover,
+.project-item button:hover,
+.session-actions button:hover {
+  background: #e0e6e9;
+}
+
+.project-list {
+  display: grid;
+  gap: 5px;
+}
+
+.project-item {
+  align-items: center;
   border-left: 3px solid #e58a7a;
   color: #303844;
+  display: flex;
   font-size: 14px;
-  margin: 0;
+  justify-content: space-between;
   padding: 4px 8px;
+}
+
+.project-item > div,
+.session-actions {
+  display: flex;
+  gap: 4px;
 }
 
 .recents {
@@ -163,19 +195,33 @@ textarea:disabled {
   border: 1px solid transparent;
   color: #303844;
   display: flex;
+  gap: 5px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 4px;
+}
+
+.session-select {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: inherit;
+  display: flex;
+  flex: 1;
   gap: 9px;
   min-width: 0;
-  padding: 8px;
+  padding: 4px;
   text-align: left;
 }
 
-.session-item:hover {
+.session-select:hover,
+.session-item:has(.session-select[aria-current="page"]) {
   background: rgba(70, 99, 124, 0.08);
 }
 
-.session-item[aria-current="page"] {
-  background: #e0e6e9;
+.session-item:has(.session-select[aria-current="page"]) {
   border-color: #abb7bf;
+  background: #e0e6e9;
 }
 
 .session-icon {

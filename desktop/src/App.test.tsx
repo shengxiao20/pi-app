@@ -9,9 +9,16 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import type { PiClient, RpcRecord } from "./pi-client";
+import type {
+  PiClient,
+  RpcRecord,
+  WorkspaceProject,
+  WorkspaceSnapshot,
+} from "./pi-client";
 
-function createClient() {
+function createClient(
+  workspace: WorkspaceSnapshot = { projects: [], sessions: [] },
+) {
   let handler: ((event: RpcRecord) => void) | undefined;
   let sessionNumber = 1;
   const client: PiClient = {
@@ -32,6 +39,21 @@ function createClient() {
       handler = nextHandler;
       return () => undefined;
     }),
+    loadWorkspace: vi.fn().mockResolvedValue(workspace),
+    createProject: vi.fn().mockImplementation(async (name: string) => ({
+      id: "project-created",
+      name,
+      path: "/workspace/project-created",
+    })),
+    renameProject: vi.fn().mockImplementation(
+      async (id: string, name: string): Promise<WorkspaceProject> => ({
+        id,
+        name,
+        path: "/workspace/project-created",
+      }),
+    ),
+    deleteProject: vi.fn().mockResolvedValue(undefined),
+    deleteSession: vi.fn().mockResolvedValue(undefined),
   };
   return { client, emit: (event: RpcRecord) => handler?.(event) };
 }
@@ -71,7 +93,7 @@ describe("App", () => {
       }),
     );
     expect(
-      screen.getByRole("button", { name: /New conversation 2/ }),
+      screen.getByRole("button", { name: /New conversation 2 Empty/ }),
     ).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Message"), {
@@ -97,6 +119,77 @@ describe("App", () => {
     );
   });
 
+  it("imports existing sessions and supports project and session CRUD", async () => {
+    const fake = createClient({
+      projects: [
+        { id: "project-1", name: "Pi App", path: "/workspace/pi-app" },
+      ],
+      sessions: [{ path: "/tmp/imported.jsonl", name: "Existing Pi session" }],
+    });
+    const prompt = vi
+      .spyOn(window, "prompt")
+      .mockReturnValueOnce("Desktop client")
+      .mockReturnValueOnce("Renamed project")
+      .mockReturnValueOnce("Renamed session");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App client={fake.client} />);
+
+    await screen.findByText("ready");
+    expect(fake.client.loadWorkspace).toHaveBeenCalledOnce();
+    expect(screen.getByText("Existing Pi session")).toBeTruthy();
+    expect(screen.getByText("Pi App")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add project" }));
+    await waitFor(() =>
+      expect(fake.client.createProject).toHaveBeenCalledWith("Desktop client"),
+    );
+    expect(screen.getByText("Desktop client")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Rename project Pi App" }),
+    );
+    await waitFor(() =>
+      expect(fake.client.renameProject).toHaveBeenCalledWith(
+        "project-1",
+        "Renamed project",
+      ),
+    );
+    expect(screen.getByText("Renamed project")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Rename session Existing Pi session",
+      }),
+    );
+    await waitFor(() =>
+      expect(fake.client.sendRpc).toHaveBeenCalledWith({
+        id: "rename-session-1",
+        type: "set_session_name",
+        name: "Renamed session",
+      }),
+    );
+    expect(screen.getAllByText("Renamed session")).toHaveLength(2);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete session Renamed session" }),
+    );
+    await waitFor(() =>
+      expect(fake.client.deleteSession).toHaveBeenCalledWith(
+        "/tmp/imported.jsonl",
+      ),
+    );
+    expect(screen.queryAllByText("Renamed session")).toHaveLength(0);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete project Renamed project" }),
+    );
+    await waitFor(() =>
+      expect(fake.client.deleteProject).toHaveBeenCalledWith("project-1"),
+    );
+    expect(screen.queryByText("Renamed project")).toBeNull();
+    prompt.mockRestore();
+    confirm.mockRestore();
+  });
   it("starts an agent, renders streamed text, and returns to idle when Pi settles", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);
