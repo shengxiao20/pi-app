@@ -28,6 +28,7 @@ export interface ResolveDesktopBinaryOptions {
 
 export interface LaunchDesktopClientOptions {
   cwd: string;
+  sessionFile: string;
   platform?: string;
   arch?: string;
   packageRoot?: string;
@@ -75,10 +76,15 @@ export function launchDesktopClient({
   arch = process.arch,
   packageRoot = fileURLToPath(new URL("../..", import.meta.url)),
   cwd,
+  sessionFile,
   spawn = nodeSpawn,
 }: LaunchDesktopClientOptions): string {
   const binaryPath = resolveDesktopBinary({ platform, arch, packageRoot });
-  const child = spawn(binaryPath, [], { cwd, detached: true, stdio: "ignore" });
+  const child = spawn(binaryPath, ["--pi-session-file", sessionFile], {
+    cwd,
+    detached: true,
+    stdio: "ignore",
+  });
 
   child.unref();
   return binaryPath;

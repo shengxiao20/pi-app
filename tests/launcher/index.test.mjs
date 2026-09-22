@@ -64,7 +64,7 @@ test("resolves the platform package binary and rejects a missing binary explicit
   );
 });
 
-test("starts the resolved desktop binary detached in the caller working directory", () => {
+test("starts the resolved desktop binary detached in the caller working directory with the handed-off session", () => {
   const packageRoot = mkdtempSync(join(tmpdir(), "pi-app-launcher-"));
   const cwd = join(packageRoot, "project");
   const binaryPath = join(
@@ -88,6 +88,7 @@ test("starts the resolved desktop binary detached in the caller working director
     arch: "x64",
     packageRoot,
     cwd,
+    sessionFile: "/sessions/current.jsonl",
     spawn(command, args, options) {
       spawnCall = { command, args, options };
       return { unref: () => unrefCalls++ };
@@ -97,7 +98,7 @@ test("starts the resolved desktop binary detached in the caller working director
   assert.equal(launchedPath, binaryPath);
   assert.deepEqual(spawnCall, {
     command: binaryPath,
-    args: [],
+    args: ["--pi-session-file", "/sessions/current.jsonl"],
     options: { cwd, detached: true, stdio: "ignore" },
   });
   assert.equal(unrefCalls, 1);

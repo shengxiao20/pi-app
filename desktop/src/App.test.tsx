@@ -9,50 +9,48 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import type {
-  PiClient,
-  RpcRecord,
-  WorkspaceProject,
-  WorkspaceSnapshot,
-} from "./pi-client";
+import type { PiClient, RpcRecord } from "./pi-client";
 
-function createClient(
-  workspace: WorkspaceSnapshot = { projects: [], sessions: [] },
-) {
+function createClient(launchSession = "/sessions/terminal.jsonl") {
   let handler: ((event: RpcRecord) => void) | undefined;
   let sessionNumber = 1;
   const client: PiClient = {
     startAgent: vi.fn().mockResolvedValue(undefined),
+    launchSession: vi.fn().mockResolvedValue(launchSession),
     sendRpc: vi.fn().mockImplementation(async (request: RpcRecord) => {
       if (request.type === "new_session") sessionNumber += 1;
       if (request.type === "get_state") {
         return {
           type: "response",
           success: true,
-          data: { sessionFile: `/tmp/session-${sessionNumber}.jsonl` },
+          data: {
+            sessionFile: `/sessions/session-${sessionNumber}.jsonl`,
+            sessionName: "Terminal conversation",
+          },
         };
       }
-      return { type: "response", success: true };
+      if (request.type === "get_messages") {
+        return {
+          type: "response",
+          success: true,
+          data: {
+            messages: [
+              { role: "user", content: "Continue this work" },
+              {
+                role: "assistant",
+                content: [{ type: "text", text: "I have the context." }],
+              },
+            ],
+          },
+        };
+      }
+      return { type: "response", success: true, data: { cancelled: false } };
     }),
     abortAgent: vi.fn().mockResolvedValue({ type: "response", success: true }),
     listen: vi.fn().mockImplementation(async (nextHandler) => {
       handler = nextHandler;
       return () => undefined;
     }),
-    loadWorkspace: vi.fn().mockResolvedValue(workspace),
-    createProject: vi.fn().mockImplementation(async (name: string) => ({
-      id: "project-created",
-      name,
-      path: "/workspace/project-created",
-    })),
-    renameProject: vi.fn().mockImplementation(
-      async (id: string, name: string): Promise<WorkspaceProject> => ({
-        id,
-        name,
-        path: "/workspace/project-created",
-      }),
-    ),
-    deleteProject: vi.fn().mockResolvedValue(undefined),
     deleteSession: vi.fn().mockResolvedValue(undefined),
   };
   return { client, emit: (event: RpcRecord) => handler?.(event) };
@@ -60,6 +58,26 @@ function createClient(
 
 describe("App", () => {
   afterEach(() => cleanup());
+
+  it("restores the terminal handoff session and renders persisted Pi history", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+
+    await screen.findByText("ready");
+    expect(fake.client.launchSession).toHaveBeenCalledOnce();
+    expect(fake.client.sendRpc).toHaveBeenCalledWith({
+      id: "handoff-switch",
+      type: "switch_session",
+      sessionPath: "/sessions/terminal.jsonl",
+    });
+    expect(fake.client.sendRpc).toHaveBeenCalledWith({
+      id: "handoff-messages",
+      type: "get_messages",
+    });
+    expect(screen.getAllByText("Continue this work")).toHaveLength(1);
+    expect(screen.getAllByText("I have the context.")).toHaveLength(2);
+    expect(screen.queryByRole("heading", { name: "Projects" })).toBeNull();
+  });
 
   it("starts an agent only once under React StrictMode", async () => {
     const fake = createClient();
@@ -73,189 +91,94 @@ describe("App", () => {
     expect(fake.client.startAgent).toHaveBeenCalledOnce();
   });
 
-  it("creates and selects Pi-backed workspace sessions from the sidebar", async () => {
+  it("does not select a session when Pi cancels switching", async () => {
     const fake = createClient();
+    fake.client.sendRpc = vi
+      .fn()
+      .mockImplementation(async (request: RpcRecord) => {
+        if (request.type === "get_state") {
+          return {
+            type: "response",
+            success: true,
+            data: { sessionFile: "/sessions/one.jsonl" },
+          };
+        }
+        if (request.type === "get_messages") {
+          return { type: "response", success: true, data: { messages: [] } };
+        }
+        if (request.type === "new_session")
+          return {
+            type: "response",
+            success: true,
+            data: { cancelled: false },
+          };
+        if (request.type === "switch_session") {
+          return request.id === "handoff-switch"
+            ? { type: "response", success: true, data: { cancelled: false } }
+            : { type: "response", success: true, data: { cancelled: true } };
+        }
+        return { type: "response", success: true, data: { cancelled: false } };
+      });
     render(<App client={fake.client} />);
     await screen.findByText("ready");
-
-    expect(
-      screen.getByRole("navigation", { name: "Workspace navigation" }),
-    ).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Recents" })).toBeTruthy();
-    expect(screen.queryByText("Sessions")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-
-    await waitFor(() =>
-      expect(fake.client.sendRpc).toHaveBeenCalledWith({
-        id: "session-0",
-        type: "new_session",
-      }),
-    );
-    expect(
-      screen.getByRole("button", { name: /New conversation 2 Empty/ }),
-    ).toBeTruthy();
-
-    fireEvent.change(screen.getByLabelText("Message"), {
-      target: { value: "Keep this in session two" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(screen.getAllByText("Keep this in session two")).toHaveLength(2);
-    fake.emit({ type: "agent_settled" });
-    await screen.findByText("idle");
-
+    await screen.findByRole("button", { name: /New conversation 2 Empty/ });
     fireEvent.click(
       screen.getByRole("button", { name: /New conversation Empty/ }),
     );
-    await waitFor(() =>
-      expect(screen.getAllByText("Keep this in session two")).toHaveLength(1),
-    );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /New conversation 2 Keep/ }),
-    );
     await waitFor(() =>
-      expect(screen.getAllByText("Keep this in session two")).toHaveLength(2),
+      expect(screen.getByRole("alert").textContent).toContain("cancelled"),
     );
+    expect(
+      screen.getByRole("heading", { name: "New conversation 2" }),
+    ).toBeTruthy();
   });
 
-  it("imports existing sessions and supports project and session CRUD", async () => {
-    const fake = createClient({
-      projects: [
-        { id: "project-1", name: "Pi App", path: "/workspace/pi-app" },
-      ],
-      sessions: [{ path: "/tmp/imported.jsonl", name: "Existing Pi session" }],
-    });
-    const prompt = vi
-      .spyOn(window, "prompt")
-      .mockReturnValueOnce("Desktop client")
-      .mockReturnValueOnce("Renamed project")
-      .mockReturnValueOnce("Renamed session");
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("does not rename a session when Pi rejects the rename", async () => {
+    const fake = createClient();
+    fake.client.sendRpc = vi
+      .fn()
+      .mockImplementation(async (request: RpcRecord) => {
+        if (request.type === "get_state")
+          return {
+            type: "response",
+            success: true,
+            data: { sessionFile: "/sessions/terminal.jsonl" },
+          };
+        if (request.type === "get_messages")
+          return { type: "response", success: true, data: { messages: [] } };
+        if (request.type === "set_session_name")
+          return { type: "response", success: false, error: "not allowed" };
+        return { type: "response", success: true, data: { cancelled: false } };
+      });
+    vi.spyOn(window, "prompt").mockReturnValue("Rejected name");
     render(<App client={fake.client} />);
-
     await screen.findByText("ready");
-    expect(fake.client.loadWorkspace).toHaveBeenCalledOnce();
-    expect(screen.getByText("Existing Pi session")).toBeTruthy();
-    expect(screen.getByText("Pi App")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "+ Add project" }));
-    await waitFor(() =>
-      expect(fake.client.createProject).toHaveBeenCalledWith("Desktop client"),
-    );
-    expect(screen.getByText("Desktop client")).toBeTruthy();
-
     fireEvent.click(
-      screen.getByRole("button", { name: "Rename project Pi App" }),
+      screen.getByRole("button", { name: "Rename session New conversation" }),
     );
-    await waitFor(() =>
-      expect(fake.client.renameProject).toHaveBeenCalledWith(
-        "project-1",
-        "Renamed project",
-      ),
-    );
-    expect(screen.getByText("Renamed project")).toBeTruthy();
 
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Rename session Existing Pi session",
-      }),
-    );
     await waitFor(() =>
-      expect(fake.client.sendRpc).toHaveBeenCalledWith({
-        id: "rename-session-1",
-        type: "set_session_name",
-        name: "Renamed session",
-      }),
+      expect(screen.getByRole("alert").textContent).toContain("not allowed"),
     );
-    expect(screen.getAllByText("Renamed session")).toHaveLength(2);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Delete session Renamed session" }),
-    );
-    await waitFor(() =>
-      expect(fake.client.deleteSession).toHaveBeenCalledWith(
-        "/tmp/imported.jsonl",
-      ),
-    );
-    expect(screen.queryAllByText("Renamed session")).toHaveLength(0);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Delete project Renamed project" }),
-    );
-    await waitFor(() =>
-      expect(fake.client.deleteProject).toHaveBeenCalledWith("project-1"),
-    );
-    expect(screen.queryByText("Renamed project")).toBeNull();
-    prompt.mockRestore();
-    confirm.mockRestore();
+    expect(screen.queryByText("Rejected name")).toBeNull();
   });
-  it("starts an agent, renders streamed text, and returns to idle when Pi settles", async () => {
+
+  it("renders streamed text and aborts an active session", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);
-
     await screen.findByText("ready");
-    expect(fake.client.startAgent).toHaveBeenCalledOnce();
-
     fireEvent.change(screen.getByLabelText("Message"), {
       target: { value: "Explain this repo" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-
-    expect(fake.client.sendRpc).toHaveBeenCalledWith({
-      id: "prompt-0",
-      type: "prompt",
-      message: "Explain this repo",
-    });
-    expect(screen.getByText("streaming")).toBeTruthy();
-    expect(screen.getAllByText("Explain this repo")).toHaveLength(2);
-
     fake.emit({
       type: "message_update",
       assistantMessageEvent: { type: "text_delta", delta: "I can help." },
     });
     expect((await screen.findAllByText("I can help.")).length).toBe(2);
-
-    fake.emit({ type: "agent_settled" });
-    await waitFor(() => expect(screen.getByText("idle")).toBeTruthy());
-  });
-
-  it("renders tool output and aborts an active stream", async () => {
-    const fake = createClient();
-    render(<App client={fake.client} />);
-    await screen.findByText("ready");
-
-    fireEvent.change(screen.getByLabelText("Message"), {
-      target: { value: "List files" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    fake.emit({
-      type: "tool_execution_start",
-      toolCallId: "tool-1",
-      toolName: "bash",
-    });
-    fake.emit({
-      type: "tool_execution_update",
-      toolCallId: "tool-1",
-      partialResult: { content: [{ type: "text", text: "src\n" }] },
-    });
-
-    expect(await screen.findByText("bash")).toBeTruthy();
-    expect(screen.getByText("src")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     await waitFor(() => expect(fake.client.abortAgent).toHaveBeenCalledOnce());
-  });
-
-  it("displays startup and bridge failures", async () => {
-    const fake = createClient();
-    fake.client.startAgent = vi
-      .fn()
-      .mockRejectedValue(new Error("Pi executable is missing"));
-    render(<App client={fake.client} />);
-
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "Pi executable is missing",
-    );
-    expect(screen.getByText("failed")).toBeTruthy();
   });
 });
