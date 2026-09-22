@@ -5,6 +5,7 @@
 node_modules/
 dist/
 coverage/
+*.tgz
 
 # Rust and Tauri build output
 target/

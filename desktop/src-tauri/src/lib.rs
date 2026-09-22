@@ -19,6 +19,9 @@ pub fn run() {
             commands::send_rpc,
             commands::abort_agent,
             commands::launch_session,
+            commands::current_directory,
+            commands::list_sessions,
+            commands::session_history,
             commands::delete_session,
         ])
         .run(tauri::generate_context!())

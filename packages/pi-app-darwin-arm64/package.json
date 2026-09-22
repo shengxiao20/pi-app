@@ -1,9 +1,0 @@
-{
-  "name": "pi-app-darwin-arm64",
-  "version": "0.1.0",
-  "private": false,
-  "os": ["darwin"],
-  "cpu": ["arm64"],
-  "files": ["bin/pi-app", "Pi App.app"],
-  "description": "Pi App native desktop binary for macOS Apple Silicon"
-}

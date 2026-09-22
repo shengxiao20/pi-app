@@ -1,14 +1,34 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 const repositoryRoot = process.cwd();
 
+test("rebuilds Tauri's embedded frontend assets whenever Vite updates desktop/dist", () => {
+  const buildScript = readFileSync(
+    join(repositoryRoot, "desktop", "src-tauri", "build.rs"),
+    "utf8",
+  );
+
+  assert.match(
+    buildScript,
+    /track_frontend_assets\(Path::new\("\.\.\/dist"\)\)/,
+    "Tauri must re-embed Vite assets after desktop/dist changes",
+  );
+});
+
 test("packs a clean-installable root package with its current-platform desktop binary", () => {
   const workspace = mkdtempSync(join(tmpdir(), "pi-app-pack-"));
+  let tarball;
   try {
     execFileSync("npm", ["run", "prepack"], {
       cwd: repositoryRoot,
@@ -20,15 +40,55 @@ test("packs a clean-installable root package with its current-platform desktop b
         encoding: "utf8",
       }),
     );
-    const tarball = join(repositoryRoot, packResult[0].filename);
+    tarball = join(repositoryRoot, packResult[0].filename);
     const contents = packResult[0].files.map((file) => file.path);
 
-    assert.ok(contents.includes("extensions/app.ts"));
-    assert.ok(contents.includes("dist/launcher/index.js"));
+    assert.equal(packResult[0].name, "pi-native-app");
+    assert.deepEqual(contents.sort(), [
+      "LICENSE",
+      "README.md",
+      "dist/launcher/index.d.ts",
+      "dist/launcher/index.js",
+      "extensions/app.ts",
+      "node_modules/pi-native-app-darwin-arm64/Pi App.app/Contents/Info.plist",
+      "node_modules/pi-native-app-darwin-arm64/Pi App.app/Contents/MacOS/pi-app-desktop",
+      "node_modules/pi-native-app-darwin-arm64/Pi App.app/Contents/Resources/icon.icns",
+      "node_modules/pi-native-app-darwin-arm64/Pi App.app/Contents/_CodeSignature/CodeResources",
+      "node_modules/pi-native-app-darwin-arm64/bin/pi-native-app",
+      "node_modules/pi-native-app-darwin-arm64/package.json",
+      "package.json",
+    ]);
+    const viteHtml = readFileSync(
+      join(repositoryRoot, "desktop", "dist", "index.html"),
+      "utf8",
+    );
+    const viteScript = viteHtml.match(/src="([^\"]+)"/)?.[1];
+    assert.ok(viteScript, "Vite index.html must reference a JavaScript entry");
+    const packageExecutable = join(
+      repositoryRoot,
+      "packages",
+      "pi-native-app-darwin-arm64",
+      "Pi App.app",
+      "Contents",
+      "MacOS",
+      "pi-app-desktop",
+    );
     assert.ok(
-      contents.includes(
-        "node_modules/pi-app-darwin-arm64/Pi App.app/Contents/MacOS/pi-app-desktop",
-      ),
+      readFileSync(packageExecutable).includes(Buffer.from(viteScript)),
+      "the packaged executable must embed Vite's current JavaScript entry",
+    );
+    assert.doesNotThrow(() =>
+      execFileSync("codesign", [
+        "--verify",
+        "--deep",
+        "--strict",
+        join(
+          repositoryRoot,
+          "packages",
+          "pi-native-app-darwin-arm64",
+          "Pi App.app",
+        ),
+      ]),
     );
 
     execFileSync("npm", ["install", "--ignore-scripts", tarball], {
@@ -41,27 +101,34 @@ test("packs a clean-installable root package with its current-platform desktop b
     const binary = join(
       workspace,
       "node_modules",
-      "pi-app",
+      "pi-native-app",
       "node_modules",
-      "pi-app-darwin-arm64",
+      "pi-native-app-darwin-arm64",
       "bin",
-      "pi-app",
+      "pi-native-app",
     );
     assert.ok(existsSync(binary));
+    const appBundle = join(
+      workspace,
+      "node_modules",
+      "pi-native-app",
+      "node_modules",
+      "pi-native-app-darwin-arm64",
+      "Pi App.app",
+    );
+    const installedExecutable = join(
+      appBundle,
+      "Contents",
+      "MacOS",
+      "pi-app-desktop",
+    );
+    assert.ok(existsSync(installedExecutable));
     assert.ok(
-      existsSync(
-        join(
-          workspace,
-          "node_modules",
-          "pi-app",
-          "node_modules",
-          "pi-app-darwin-arm64",
-          "Pi App.app",
-          "Contents",
-          "MacOS",
-          "pi-app-desktop",
-        ),
-      ),
+      readFileSync(installedExecutable).includes(Buffer.from(viteScript)),
+      "the clean-installed executable must embed Vite's current JavaScript entry",
+    );
+    assert.doesNotThrow(() =>
+      execFileSync("codesign", ["--verify", "--deep", "--strict", appBundle]),
     );
 
     const launchResult = execFileSync(
@@ -70,7 +137,16 @@ test("packs a clean-installable root package with its current-platform desktop b
         "--experimental-strip-types",
         "--input-type=module",
         "--eval",
-        `import { launchDesktopClient } from ${JSON.stringify(join(workspace, "node_modules", "pi-app", "dist", "launcher", "index.js"))};\nconst binary = launchDesktopClient({ cwd: ${JSON.stringify(workspace)}, spawn: (command) => ({ unref() { console.log(command); } }) });\nconsole.log(binary);`,
+        `import { launchDesktopClient } from ${JSON.stringify(
+          join(
+            workspace,
+            "node_modules",
+            "pi-native-app",
+            "dist",
+            "launcher",
+            "index.js",
+          ),
+        )};\nconst binary = launchDesktopClient({ cwd: ${JSON.stringify(workspace)}, spawn: (command) => ({ unref() { console.log(command); } }) });\nconsole.log(binary);`,
       ],
       { encoding: "utf8" },
     );
@@ -85,7 +161,7 @@ test("packs a clean-installable root package with its current-platform desktop b
         "--no-context-files",
         "--no-extensions",
         "-e",
-        "node_modules/pi-app",
+        "node_modules/pi-native-app",
       ],
       { cwd: workspace, input: '{"type":"get_commands"}\n', encoding: "utf8" },
     )
@@ -99,5 +175,6 @@ test("packs a clean-installable root package with its current-platform desktop b
     assert.ok(commands.data.commands.some((command) => command.name === "app"));
   } finally {
     rmSync(workspace, { force: true, recursive: true });
+    if (tarball) rmSync(tarball, { force: true });
   }
 });

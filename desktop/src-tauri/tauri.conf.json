@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Pi App",
-        "width": 960,
-        "height": 720
+        "width": 1440,
+        "height": 900
       }
     ],
     "security": {

@@ -1,24 +1,41 @@
 {
-  "name": "pi-app",
+  "name": "pi-native-app",
   "version": "0.1.0",
+  "description": "Native desktop client for the Pi coding-agent harness",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shengxiao20/pi-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shengxiao20/pi-app/issues"
+  },
+  "homepage": "https://github.com/shengxiao20/pi-app#readme",
   "private": false,
   "type": "module",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "native",
+    "desktop",
+    "tauri"
   ],
   "workspaces": [
     "desktop",
     "packages/*"
   ],
   "files": [
-    "dist",
+    "README.md",
+    "LICENSE",
+    "dist/launcher",
     "extensions"
   ],
   "optionalDependencies": {
-    "pi-app-darwin-arm64": "file:packages/pi-app-darwin-arm64"
+    "pi-native-app-darwin-arm64": "file:packages/pi-native-app-darwin-arm64"
   },
   "bundledDependencies": [
-    "pi-app-darwin-arm64"
+    "pi-native-app-darwin-arm64"
   ],
   "pi": {
     "extensions": [
@@ -39,7 +56,7 @@
     "rust:clippy": "cargo clippy --manifest-path desktop/src-tauri/Cargo.toml -- -D warnings",
     "rust:test": "cargo test --manifest-path desktop/src-tauri/Cargo.toml",
     "build:launcher": "tsc -p tsconfig.launcher.json",
-    "build:native": "npm exec --yes @tauri-apps/cli -- build --config desktop/src-tauri/tauri.conf.json && node scripts/package-native.mjs",
+    "build:native": "npm exec --yes @tauri-apps/cli -- build --bundles app --config desktop/src-tauri/tauri.conf.json && node scripts/package-native.mjs",
     "prepack": "npm run build:launcher && npm run build:native",
     "test:packaging": "node --test tests/packaging/smoke.test.mjs"
   }

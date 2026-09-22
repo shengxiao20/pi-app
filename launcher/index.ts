@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 const platformPackages = {
-  "darwin-arm64": "pi-app-darwin-arm64",
-  "darwin-x64": "pi-app-darwin-x64",
-  "linux-x64": "pi-app-linux-x64-gnu",
-  "win32-x64": "pi-app-win32-x64-msvc",
+  "darwin-arm64": "pi-native-app-darwin-arm64",
+  "darwin-x64": "pi-native-app-darwin-x64",
+  "linux-x64": "pi-native-app-linux-x64-gnu",
+  "win32-x64": "pi-native-app-win32-x64-msvc",
 } as const;
 
 type SupportedPlatform = keyof typeof platformPackages;
@@ -55,7 +55,8 @@ export function resolveDesktopBinary({
   packageRoot,
 }: ResolveDesktopBinaryOptions): string {
   const packageName = resolvePlatformPackageName(platform, arch);
-  const executableName = platform === "win32" ? "pi-app.exe" : "pi-app";
+  const executableName =
+    platform === "win32" ? "pi-native-app.exe" : "pi-native-app";
   const binaryPath = join(
     packageRoot,
     "node_modules",

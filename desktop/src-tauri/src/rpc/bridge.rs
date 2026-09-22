@@ -50,8 +50,16 @@ impl From<SupervisorError> for BridgeError {
 
 impl AgentBridge {
     /// Creates a bridge for the Pi executable in the desktop process environment.
-    pub fn pi() -> Self {
-        Self::new("pi", [OsString::from("--mode"), OsString::from("rpc")])
+    pub fn pi(session_dir: &Path) -> Self {
+        Self::new(
+            "pi",
+            [
+                OsString::from("--mode"),
+                OsString::from("rpc"),
+                OsString::from("--session-dir"),
+                session_dir.as_os_str().to_owned(),
+            ],
+        )
     }
 
     pub fn new(

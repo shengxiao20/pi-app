@@ -13,19 +13,19 @@ import {
 test("resolves every supported operating system and architecture to its platform package", () => {
   assert.equal(
     resolvePlatformPackageName("darwin", "arm64"),
-    "pi-app-darwin-arm64",
+    "pi-native-app-darwin-arm64",
   );
   assert.equal(
     resolvePlatformPackageName("darwin", "x64"),
-    "pi-app-darwin-x64",
+    "pi-native-app-darwin-x64",
   );
   assert.equal(
     resolvePlatformPackageName("linux", "x64"),
-    "pi-app-linux-x64-gnu",
+    "pi-native-app-linux-x64-gnu",
   );
   assert.equal(
     resolvePlatformPackageName("win32", "x64"),
-    "pi-app-win32-x64-msvc",
+    "pi-native-app-win32-x64-msvc",
   );
 });
 
@@ -45,13 +45,16 @@ test("resolves the platform package binary and rejects a missing binary explicit
   const binaryPath = join(
     packageRoot,
     "node_modules",
-    "pi-app-darwin-arm64",
+    "pi-native-app-darwin-arm64",
     "bin",
-    "pi-app",
+    "pi-native-app",
   );
-  mkdirSync(join(packageRoot, "node_modules", "pi-app-darwin-arm64", "bin"), {
-    recursive: true,
-  });
+  mkdirSync(
+    join(packageRoot, "node_modules", "pi-native-app-darwin-arm64", "bin"),
+    {
+      recursive: true,
+    },
+  );
   writeFileSync(binaryPath, "desktop binary");
 
   assert.equal(
@@ -60,7 +63,7 @@ test("resolves the platform package binary and rejects a missing binary explicit
   );
   assert.throws(
     () => resolveDesktopBinary({ platform: "linux", arch: "x64", packageRoot }),
-    /Pi App desktop binary is missing: .*pi-app-linux-x64-gnu\/bin\/pi-app/,
+    /Pi App desktop binary is missing: .*pi-native-app-linux-x64-gnu\/bin\/pi-native-app/,
   );
 });
 
@@ -70,14 +73,17 @@ test("starts the resolved desktop binary detached in the caller working director
   const binaryPath = join(
     packageRoot,
     "node_modules",
-    "pi-app-win32-x64-msvc",
+    "pi-native-app-win32-x64-msvc",
     "bin",
-    "pi-app.exe",
+    "pi-native-app.exe",
   );
   mkdirSync(join(packageRoot, "project"));
-  mkdirSync(join(packageRoot, "node_modules", "pi-app-win32-x64-msvc", "bin"), {
-    recursive: true,
-  });
+  mkdirSync(
+    join(packageRoot, "node_modules", "pi-native-app-win32-x64-msvc", "bin"),
+    {
+      recursive: true,
+    },
+  );
   writeFileSync(binaryPath, "desktop binary");
 
   let spawnCall;
