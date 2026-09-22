@@ -56,8 +56,13 @@ describe("App", () => {
     render(<App client={fake.client} />);
     await screen.findByText("ready");
 
-    expect(screen.getByRole("navigation", { name: "Sessions" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "New session" }));
+    expect(
+      screen.getByRole("navigation", { name: "Workspace navigation" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Recents" })).toBeTruthy();
+    expect(screen.queryByText("Sessions")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
 
     await waitFor(() =>
       expect(fake.client.sendRpc).toHaveBeenCalledWith({

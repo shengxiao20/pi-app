@@ -185,39 +185,57 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">π</span>
-          <span>Pi App</span>
+        <div className="brand" aria-label="Pi App">
+          <span className="brand-mark" aria-hidden="true">
+            π
+          </span>
+          <span>PI APP</span>
         </div>
-        <button
-          className="new-session"
-          disabled={status !== "ready" && status !== "idle"}
-          onClick={() => void createSession()}
-          type="button"
-        >
-          <span aria-hidden="true">+</span> New session
-        </button>
-        <nav aria-label="Sessions" className="session-list">
-          <p className="section-label">SESSIONS</p>
-          {sessions.map((session) => (
-            <button
-              aria-current={session.id === activeSessionId ? "page" : undefined}
-              className="session-item"
-              key={session.id}
-              onClick={() => void selectSession(session)}
-              type="button"
-            >
-              <span className="session-icon" aria-hidden="true">
-                ◌
-              </span>
-              <span className="session-copy">
-                <strong>{session.title}</strong>
-                <small>
-                  {session.messages.at(-1)?.text || "Empty conversation"}
-                </small>
-              </span>
-            </button>
-          ))}
+        <nav aria-label="Workspace navigation" className="workspace-navigation">
+          <button
+            className="new-session"
+            disabled={status !== "ready" && status !== "idle"}
+            onClick={() => void createSession()}
+            type="button"
+          >
+            <span aria-hidden="true">+</span> New chat
+          </button>
+          <section
+            className="navigation-section"
+            aria-labelledby="projects-heading"
+          >
+            <h2 id="projects-heading">Projects</h2>
+            <p className="project-note">This project</p>
+          </section>
+          <section
+            className="navigation-section recents"
+            aria-labelledby="recents-heading"
+          >
+            <h2 id="recents-heading">Recents</h2>
+            <div className="session-list">
+              {sessions.map((session) => (
+                <button
+                  aria-current={
+                    session.id === activeSessionId ? "page" : undefined
+                  }
+                  className="session-item"
+                  key={session.id}
+                  onClick={() => void selectSession(session)}
+                  type="button"
+                >
+                  <span className="session-icon" aria-hidden="true">
+                    □
+                  </span>
+                  <span className="session-copy">
+                    <strong>{session.title}</strong>
+                    <small>
+                      {session.messages.at(-1)?.text || "Empty conversation"}
+                    </small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
         </nav>
         <div className="sidebar-footer">
           <span className="connection-dot" /> Pi agent {status}
