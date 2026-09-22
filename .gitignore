@@ -5,10 +5,12 @@
 node_modules/
 dist/
 coverage/
+*.tgz
 
 # Rust and Tauri build output
 target/
 desktop/src-tauri/target/
+desktop/src-tauri/gen/
 
 # Environment and local editor state
 .env

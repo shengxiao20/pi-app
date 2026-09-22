@@ -36,7 +36,7 @@
    git log --oneline origin/main..HEAD
    ```
    并检查已合并/已关闭 PR（可用 `gh pr list --repo shengxiao20/pi-app`）。
-4. 将远程已完成、但任务台账尚未标为 `Done` 的任务更新到 `plan.md`，填写关联 PR/commit；同步发生冲突或远程不可访问时，明确报告并将相关任务标记为 `Blocked`，不得猜测远程状态。
+4. 将远程已完成、但任务台账尚未标为 `Done` 的任务更新到 `plan.md`，填写关联 PR/commit；同步发生冲突时，明确报告并将相关任务标记为 `Blocked`，不得猜测远程状态。远程暂时不可访问时，仅在当前对话报告；不得将该临时网络状态写入 `plan.md`，也不得仅因其阻塞本地实施。
 5. 从 `Todo` 中选择或被分派一个任务，先在 `plan.md` 中将其改为 `In Progress` 并填写 assignee，才可开始编码。
 
 若本地目录尚不是该远程仓库的 checkout，先明确报告这一事实；在完成 clone 或初始化正确 remote 前，不得声称已完成远程同步检查。

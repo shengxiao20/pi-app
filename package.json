@@ -1,9 +1,41 @@
 {
-  "name": "pi-app",
-  "version": "0.1.0",
+  "name": "pi-native-app",
+  "version": "0.1.1",
+  "description": "Native desktop client for the Pi coding-agent harness",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shengxiao20/pi-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shengxiao20/pi-app/issues"
+  },
+  "homepage": "https://github.com/shengxiao20/pi-app#readme",
+  "private": false,
   "type": "module",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "native",
+    "desktop",
+    "tauri"
+  ],
+  "workspaces": [
+    "desktop",
+    "packages/*"
+  ],
+  "files": [
+    "README.md",
+    "LICENSE",
+    "dist/launcher",
+    "extensions"
+  ],
+  "optionalDependencies": {
+    "pi-native-app-darwin-arm64": "file:packages/pi-native-app-darwin-arm64"
+  },
+  "bundledDependencies": [
+    "pi-native-app-darwin-arm64"
   ],
   "pi": {
     "extensions": [
@@ -14,6 +46,18 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "scripts": {
-    "test": "node --test tests/**/*.test.mjs"
+    "test": "node --experimental-strip-types --test tests/**/*.test.mjs",
+    "lint": "npm run lint --workspace @pi-app/desktop",
+    "typecheck": "npm run build:launcher && tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @pi-app/desktop",
+    "test:frontend": "npm run test --workspace @pi-app/desktop",
+    "format": "prettier --write launcher extensions tests scripts package.json tsconfig.json tsconfig.launcher.json && npm run format --workspace @pi-app/desktop",
+    "format:check": "prettier --check launcher extensions tests scripts package.json tsconfig.json tsconfig.launcher.json && npm run format:check --workspace @pi-app/desktop",
+    "rust:fmt": "cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check",
+    "rust:clippy": "cargo clippy --manifest-path desktop/src-tauri/Cargo.toml -- -D warnings",
+    "rust:test": "cargo test --manifest-path desktop/src-tauri/Cargo.toml",
+    "build:launcher": "tsc -p tsconfig.launcher.json",
+    "build:native": "npm exec --yes @tauri-apps/cli -- build --bundles app --config desktop/src-tauri/tauri.conf.json && node scripts/package-native.mjs",
+    "prepack": "npm run build:launcher && npm run build:native",
+    "test:packaging": "node --test tests/packaging/smoke.test.mjs"
   }
 }
