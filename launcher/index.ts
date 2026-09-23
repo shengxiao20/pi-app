@@ -15,7 +15,12 @@ type SupportedPlatform = keyof typeof platformPackages;
 type Spawn = (
   command: string,
   args: string[],
-  options: { cwd: string; detached: boolean; stdio: "ignore" },
+  options: {
+    cwd: string;
+    detached: boolean;
+    env: NodeJS.ProcessEnv;
+    stdio: "ignore";
+  },
 ) => { unref(): void };
 
 export type PlatformPackageName = (typeof platformPackages)[SupportedPlatform];
@@ -82,6 +87,7 @@ export function launchDesktopClient({
   const child = spawn(binaryPath, [], {
     cwd,
     detached: true,
+    env: { ...process.env, PI_APP_INHERITED_CWD: "1" },
     stdio: "ignore",
   });
 

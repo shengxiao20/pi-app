@@ -10,29 +10,41 @@ use crate::{
     workspace::{PersistedHistoryPage, PersistedSession, WorkspaceError, WorkspaceStore},
 };
 
-pub struct AppState {
+struct WorkspaceRuntime {
     bridge: Arc<AgentBridge>,
     cwd: PathBuf,
     workspace: WorkspaceStore,
-    event_forwarder_started: Mutex<bool>,
 }
 
-impl AppState {
-    pub fn new(cwd: PathBuf) -> Self {
+impl WorkspaceRuntime {
+    fn new(cwd: PathBuf) -> Self {
         let sessions_path = default_session_directory(&cwd);
         Self {
             bridge: Arc::new(AgentBridge::pi(&sessions_path)),
             workspace: WorkspaceStore::new(cwd.clone(), sessions_path),
             cwd,
-            event_forwarder_started: Mutex::new(false),
+        }
+    }
+}
+
+/// The currently selected workspace. A GUI launch begins without one because macOS
+/// starts application bundles from `/`; terminal and `/app` launches retain cwd.
+pub struct AppState {
+    runtime: Mutex<Option<WorkspaceRuntime>>,
+}
+
+impl AppState {
+    pub fn new(cwd: PathBuf) -> Self {
+        let runtime = std::env::var_os("PI_APP_INHERITED_CWD")
+            .is_some()
+            .then(|| WorkspaceRuntime::new(cwd));
+        Self {
+            runtime: Mutex::new(runtime),
         }
     }
 }
 
 fn default_session_directory(cwd: &std::path::Path) -> PathBuf {
-    let cwd = cwd
-        .canonicalize()
-        .expect("Pi App desktop client requires a canonical current working directory");
     let safe_cwd = format!(
         "--{}--",
         cwd.to_string_lossy()
@@ -53,6 +65,14 @@ pub struct CommandError {
     message: String,
 }
 
+impl CommandError {
+    fn workspace_required() -> Self {
+        Self {
+            message: "Select a workspace before starting Pi".into(),
+        }
+    }
+}
+
 impl From<BridgeError> for CommandError {
     fn from(error: BridgeError) -> Self {
         Self {
@@ -70,68 +90,113 @@ impl From<WorkspaceError> for CommandError {
 }
 
 #[tauri::command]
-pub fn current_directory(state: State<'_, AppState>) -> Result<PathBuf, CommandError> {
+pub async fn current_directory(
+    state: State<'_, AppState>,
+) -> Result<Option<PathBuf>, CommandError> {
+    Ok(state
+        .runtime
+        .lock()
+        .await
+        .as_ref()
+        .map(|runtime| runtime.cwd.clone()))
+}
+
+/// Opens the native folder picker and replaces the cwd-bound Pi runtime when a
+/// directory is selected. Canceling the picker leaves the current workspace intact.
+#[tauri::command]
+pub async fn choose_workspace(state: State<'_, AppState>) -> Result<Option<PathBuf>, CommandError> {
+    let selected = tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder())
+        .await
+        .expect("workspace picker task must not panic");
+    let Some(cwd) = selected else {
+        return Ok(None);
+    };
+    let cwd = cwd.canonicalize().map_err(WorkspaceError::from)?;
+    let mut runtime = state.runtime.lock().await;
+    if runtime.as_ref().is_some_and(|current| current.cwd == cwd) {
+        return Ok(Some(cwd));
+    }
+    if let Some(current) = runtime.take() {
+        current.bridge.stop_agent().await?;
+    }
+    *runtime = Some(WorkspaceRuntime::new(cwd.clone()));
+    Ok(Some(cwd))
+}
+
+#[tauri::command]
+pub async fn list_sessions(
+    state: State<'_, AppState>,
+) -> Result<Vec<PersistedSession>, CommandError> {
     state
-        .cwd
-        .canonicalize()
-        .map_err(WorkspaceError::from)
+        .runtime
+        .lock()
+        .await
+        .as_ref()
+        .ok_or_else(CommandError::workspace_required)?
+        .workspace
+        .list_sessions()
         .map_err(Into::into)
 }
 
 #[tauri::command]
-pub fn list_sessions(state: State<'_, AppState>) -> Result<Vec<PersistedSession>, CommandError> {
-    state.workspace.list_sessions().map_err(Into::into)
-}
-
-#[tauri::command]
-pub fn session_history(
+pub async fn session_history(
     state: State<'_, AppState>,
     session_path: PathBuf,
     before: Option<usize>,
     limit: usize,
 ) -> Result<PersistedHistoryPage, CommandError> {
     state
+        .runtime
+        .lock()
+        .await
+        .as_ref()
+        .ok_or_else(CommandError::workspace_required)?
         .workspace
         .session_history(session_path, before, limit)
         .map_err(Into::into)
 }
 
 #[tauri::command]
-pub fn delete_session(
-    state: State<'_, AppState>,
-    session_path: PathBuf,
-) -> Result<(), CommandError> {
-    state
-        .workspace
-        .delete_session(session_path)
-        .map_err(Into::into)
-}
-
-#[tauri::command]
 pub async fn start_agent(app: AppHandle, state: State<'_, AppState>) -> Result<(), CommandError> {
-    state.bridge.start_agent(&state.cwd).await?;
-    start_event_forwarder(app, &state).await;
+    let runtime = state.runtime.lock().await;
+    let runtime = runtime
+        .as_ref()
+        .ok_or_else(CommandError::workspace_required)?;
+    let bridge = runtime.bridge.clone();
+    let cwd = runtime.cwd.clone();
+    bridge.start_agent(&cwd).await?;
+    start_event_forwarder(app, bridge);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn send_rpc(state: State<'_, AppState>, request: Value) -> Result<Value, CommandError> {
-    state.bridge.send_rpc(request).await.map_err(Into::into)
+    let bridge = state
+        .runtime
+        .lock()
+        .await
+        .as_ref()
+        .ok_or_else(CommandError::workspace_required)?
+        .bridge
+        .clone();
+    bridge.send_rpc(request).await.map_err(Into::into)
 }
 
 #[tauri::command]
 pub async fn abort_agent(state: State<'_, AppState>) -> Result<Value, CommandError> {
-    state.bridge.abort_agent().await.map_err(Into::into)
+    let bridge = state
+        .runtime
+        .lock()
+        .await
+        .as_ref()
+        .ok_or_else(CommandError::workspace_required)?
+        .bridge
+        .clone();
+    bridge.abort_agent().await.map_err(Into::into)
 }
 
-async fn start_event_forwarder(app: AppHandle, state: &AppState) {
-    let mut event_forwarder_started = state.event_forwarder_started.lock().await;
-    if *event_forwarder_started {
-        return;
-    }
-    *event_forwarder_started = true;
-
-    let mut events = state.bridge.subscribe_events();
+fn start_event_forwarder(app: AppHandle, bridge: Arc<AgentBridge>) {
+    let mut events = bridge.subscribe_events();
     tauri::async_runtime::spawn(async move {
         while let Ok(event) = events.recv().await {
             app.emit(rpc_event_name(), event)

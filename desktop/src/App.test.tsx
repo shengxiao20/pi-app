@@ -21,6 +21,7 @@ function createClient() {
   const client: PiClient = {
     startAgent: vi.fn().mockResolvedValue(undefined),
     currentDirectory: vi.fn().mockResolvedValue("/workspace/pi-app"),
+    chooseWorkspace: vi.fn().mockResolvedValue(null),
     sendRpc: vi.fn().mockImplementation(async (request: RpcRecord) => {
       if (request.type === "new_session") sessionNumber += 1;
       if (request.type === "get_state") {
@@ -78,7 +79,6 @@ function createClient() {
       before: 0,
       hasMore: false,
     }),
-    deleteSession: vi.fn().mockResolvedValue(undefined),
   };
   return { client, emit: (event: RpcRecord) => handler?.(event) };
 }
@@ -217,7 +217,146 @@ describe("App", () => {
     render(<App client={fake.client} />);
 
     expect(await screen.findByText("/workspace/pi-app")).toBeTruthy();
-    expect(fake.client.currentDirectory).toHaveBeenCalledOnce();
+    expect(fake.client.currentDirectory).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks a direct launch to select its workspace before starting Pi", async () => {
+    const fake = createClient();
+    fake.client.currentDirectory = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("/workspace/picked")
+      .mockResolvedValueOnce("/workspace/picked");
+    fake.client.chooseWorkspace = vi
+      .fn()
+      .mockResolvedValue("/workspace/picked");
+    render(<App client={fake.client} />);
+
+    expect(await screen.findByText("/workspace/picked")).toBeTruthy();
+    expect(fake.client.chooseWorkspace).toHaveBeenCalledOnce();
+    expect(fake.client.startAgent).toHaveBeenCalledOnce();
+  });
+
+  it("instructs a direct launch to select a workspace when picker is cancelled", async () => {
+    const fake = createClient();
+    fake.client.currentDirectory = vi.fn().mockResolvedValue(null);
+    fake.client.chooseWorkspace = vi.fn().mockResolvedValue(null);
+    render(<App client={fake.client} />);
+
+    expect(
+      await screen.findByText("Select a workspace to start Pi."),
+    ).toBeTruthy();
+    expect(screen.queryByText("[object Object]")).toBeNull();
+    expect(fake.client.startAgent).not.toHaveBeenCalled();
+  });
+
+  it("switches to a workspace with no persisted sessions", async () => {
+    const fake = createClient();
+    fake.client.chooseWorkspace = vi.fn().mockResolvedValue("/workspace/empty");
+    fake.client.currentDirectory = vi
+      .fn()
+      .mockResolvedValueOnce("/workspace/pi-app")
+      .mockResolvedValueOnce("/workspace/pi-app")
+      .mockResolvedValueOnce("/workspace/empty")
+      .mockResolvedValueOnce("/workspace/empty");
+    fake.client.listSessions = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: "terminal-id",
+          path: "/sessions/terminal.jsonl",
+          title: "Terminal conversation",
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    fake.client.sendRpc = vi.fn().mockResolvedValue({
+      type: "response",
+      success: true,
+      data: {
+        sessionFile: "/empty-sessions/new.jsonl",
+        sessionId: "empty-id",
+      },
+    });
+    render(<App client={fake.client} />);
+
+    await screen.findByText("/workspace/pi-app");
+    fireEvent.click(screen.getByRole("button", { name: "Change workspace" }));
+
+    expect(await screen.findByText("/workspace/empty")).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "empty-id" }),
+    ).toBeTruthy();
+    expect(fake.client.startAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders Tauri workspace errors using their message", async () => {
+    const fake = createClient();
+    fake.client.chooseWorkspace = vi.fn().mockRejectedValue({
+      message: "Unable to switch to the selected workspace",
+    });
+    render(<App client={fake.client} />);
+
+    await screen.findByText("/workspace/pi-app");
+    fireEvent.click(screen.getByRole("button", { name: "Change workspace" }));
+
+    expect(
+      await screen.findByText("Unable to switch to the selected workspace"),
+    ).toBeTruthy();
+    expect(screen.queryByText("[object Object]")).toBeNull();
+  });
+
+  it("switches the independent RPC workspace and reloads its directory sessions", async () => {
+    const fake = createClient();
+    fake.client.chooseWorkspace = vi.fn().mockResolvedValue("/workspace/other");
+    fake.client.currentDirectory = vi
+      .fn()
+      .mockResolvedValueOnce("/workspace/pi-app")
+      .mockResolvedValueOnce("/workspace/pi-app")
+      .mockResolvedValueOnce("/workspace/other")
+      .mockResolvedValueOnce("/workspace/other");
+    fake.client.listSessions = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: "terminal-id",
+          path: "/sessions/terminal.jsonl",
+          title: "Terminal conversation",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "other-id",
+          path: "/other-sessions/other.jsonl",
+          title: "Other workspace conversation",
+        },
+      ]);
+    fake.client.sendRpc = vi
+      .fn()
+      .mockImplementation(async (request: RpcRecord) => {
+        if (request.type === "get_state")
+          return {
+            type: "response",
+            success: true,
+            data: {
+              sessionFile: "/other-sessions/other.jsonl",
+              sessionId: "other-id",
+            },
+          };
+        return { type: "response", success: true, data: { cancelled: false } };
+      });
+    render(<App client={fake.client} />);
+
+    await screen.findByText("/workspace/pi-app");
+    fireEvent.click(screen.getByRole("button", { name: "Change workspace" }));
+
+    expect(await screen.findByText("/workspace/other")).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", {
+        name: "Other workspace conversation",
+      }),
+    ).toBeTruthy();
+    expect(fake.client.chooseWorkspace).toHaveBeenCalledOnce();
+    expect(fake.client.startAgent).toHaveBeenCalledTimes(2);
   });
 
   it("loads Pi persisted Recents rather than only sessions created in this desktop process", async () => {
@@ -624,36 +763,21 @@ describe("App", () => {
     ).toBeTruthy();
   });
 
-  it("deletes a session through the in-app dialog", async () => {
+  it("renders an accessible SVG pencil for session rename without deletion", async () => {
     const fake = createClient();
-    fake.client.listSessions = vi.fn().mockResolvedValue([
-      {
-        id: "older-id",
-        path: "/sessions/older.jsonl",
-        title: "Earlier conversation",
-      },
-      {
-        id: "terminal-id",
-        path: "/sessions/terminal.jsonl",
-        title: "Terminal conversation",
-      },
-    ]);
     render(<App client={fake.client} />);
 
     await screen.findByText("CONVERSATION");
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Delete session Earlier conversation",
+    const rename = screen.getByRole("button", {
+      name: "Rename session Terminal conversation",
+    });
+    expect(rename.textContent).toBe("");
+    expect(rename.querySelector("svg")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: /Delete session/,
       }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-
-    await waitFor(() =>
-      expect(fake.client.deleteSession).toHaveBeenCalledWith(
-        "/sessions/older.jsonl",
-      ),
-    );
-    expect(screen.queryByText("Earlier conversation")).toBeNull();
+    ).toBeNull();
   });
 
   it("does not render ready status text", async () => {

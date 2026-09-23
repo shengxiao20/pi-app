@@ -5,6 +5,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdin, Command},
     sync::{mpsc, oneshot, Mutex},
+    time::{sleep, Duration},
 };
 
 use super::protocol::{JsonlDecoder, ProtocolError};
@@ -58,6 +59,7 @@ type PendingRequests = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, S
 /// Owns one Pi RPC child process and its stdin/stdout protocol channels.
 #[derive(Clone)]
 pub struct RpcSupervisor {
+    child: Arc<Mutex<Child>>,
     stdin: Arc<Mutex<ChildStdin>>,
     pending_requests: PendingRequests,
     events: Arc<Mutex<mpsc::UnboundedReceiver<Result<SupervisorEvent, SupervisorError>>>>,
@@ -84,9 +86,15 @@ impl RpcSupervisor {
             pending_requests.clone(),
             event_sender.clone(),
         ));
-        tokio::spawn(wait_for_exit(child, pending_requests.clone(), event_sender));
+        let child = Arc::new(Mutex::new(child));
+        tokio::spawn(wait_for_exit(
+            child.clone(),
+            pending_requests.clone(),
+            event_sender,
+        ));
 
         Ok(Self {
+            child,
             stdin: Arc::new(Mutex::new(stdin)),
             pending_requests,
             events: Arc::new(Mutex::new(events)),
@@ -125,6 +133,16 @@ impl RpcSupervisor {
         response_receiver
             .await
             .unwrap_or(Err(SupervisorError::ProcessExited { status: None }))
+    }
+
+    /// Terminates this Pi RPC child process.
+    pub async fn stop(&self) -> Result<(), SupervisorError> {
+        self.child
+            .lock()
+            .await
+            .kill()
+            .await
+            .map_err(SupervisorError::Spawn)
     }
 
     /// Returns the next uncorrelated Pi RPC event or terminal process error.
@@ -183,22 +201,24 @@ async fn read_stdout(
 }
 
 async fn wait_for_exit(
-    mut child: Child,
+    child: Arc<Mutex<Child>>,
     pending_requests: PendingRequests,
     event_sender: mpsc::UnboundedSender<Result<SupervisorEvent, SupervisorError>>,
 ) {
-    match child.wait().await {
-        Ok(status) => {
-            let status = status.code();
-            for (_, response_sender) in pending_requests.lock().await.drain() {
-                let _ = response_sender.send(Err(SupervisorError::ProcessExited { status }));
+    let status = loop {
+        match child.lock().await.try_wait() {
+            Ok(Some(status)) => break status.code(),
+            Ok(None) => sleep(Duration::from_millis(50)).await,
+            Err(error) => {
+                let _ = event_sender.send(Err(SupervisorError::Spawn(error)));
+                return;
             }
-            let _ = event_sender.send(Err(SupervisorError::ProcessExited { status }));
         }
-        Err(error) => {
-            let _ = event_sender.send(Err(SupervisorError::Spawn(error)));
-        }
+    };
+    for (_, response_sender) in pending_requests.lock().await.drain() {
+        let _ = response_sender.send(Err(SupervisorError::ProcessExited { status }));
     }
+    let _ = event_sender.send(Err(SupervisorError::ProcessExited { status }));
 }
 
 #[cfg(test)]

@@ -14,9 +14,9 @@ pub fn run() {
             commands::send_rpc,
             commands::abort_agent,
             commands::current_directory,
+            commands::choose_workspace,
             commands::list_sessions,
             commands::session_history,
-            commands::delete_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pi App desktop client");

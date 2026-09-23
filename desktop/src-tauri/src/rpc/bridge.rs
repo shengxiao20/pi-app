@@ -1,7 +1,10 @@
 use std::{
     ffi::OsString,
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use serde_json::{json, Value};
@@ -21,6 +24,7 @@ pub struct AgentBridge {
     supervisor: Mutex<Option<RpcSupervisor>>,
     events: broadcast::Sender<Value>,
     request_sequence: AtomicU64,
+    stopped: Arc<AtomicBool>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -51,15 +55,8 @@ impl From<SupervisorError> for BridgeError {
 impl AgentBridge {
     /// Creates a bridge for the Pi executable in the desktop process environment.
     pub fn pi(session_dir: &Path) -> Self {
-        Self::new(
-            "pi",
-            [
-                OsString::from("--mode"),
-                OsString::from("rpc"),
-                OsString::from("--session-dir"),
-                session_dir.as_os_str().to_owned(),
-            ],
-        )
+        let (command, arguments) = pi_command(session_dir);
+        Self::new(command, arguments)
     }
 
     pub fn new(
@@ -73,6 +70,7 @@ impl AgentBridge {
             supervisor: Mutex::new(None),
             events,
             request_sequence: AtomicU64::default(),
+            stopped: Arc::new(AtomicBool::default()),
         }
     }
 
@@ -85,8 +83,22 @@ impl AgentBridge {
         let mut command = Command::new(&self.command);
         command.args(&self.arguments).current_dir(cwd);
         let supervisor = RpcSupervisor::start(command).await?;
-        forward_events(supervisor.clone(), self.events.clone());
+        forward_events(
+            supervisor.clone(),
+            self.events.clone(),
+            self.stopped.clone(),
+        );
         *supervisor_slot = Some(supervisor);
+        Ok(())
+    }
+
+    /// Stops the currently running Pi RPC process before replacing its workspace.
+    pub async fn stop_agent(&self) -> Result<(), BridgeError> {
+        self.stopped.store(true, Ordering::Relaxed);
+        let supervisor = self.supervisor.lock().await.take();
+        if let Some(supervisor) = supervisor {
+            supervisor.stop().await?;
+        }
         Ok(())
     }
 
@@ -117,7 +129,41 @@ impl AgentBridge {
     }
 }
 
-fn forward_events(supervisor: RpcSupervisor, events: broadcast::Sender<Value>) {
+/// Starts Pi through the user's zsh login/interactive environment on macOS. Finder and
+/// Dock do not inherit shell configuration, while npm-installed Pi can depend on NVM's
+/// PATH for both `pi` and its Node interpreter. `exec` keeps Pi's JSONL stdin/stdout
+/// directly connected to the supervisor after shell initialization.
+#[cfg(target_os = "macos")]
+fn pi_command(session_dir: &Path) -> (OsString, Vec<OsString>) {
+    (
+        OsString::from("/bin/zsh"),
+        vec![
+            OsString::from("-ilc"),
+            OsString::from("exec pi --mode rpc --session-dir \"$1\""),
+            OsString::from("pi-app-rpc"),
+            session_dir.as_os_str().to_owned(),
+        ],
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pi_command(session_dir: &Path) -> (OsString, Vec<OsString>) {
+    (
+        OsString::from("pi"),
+        vec![
+            OsString::from("--mode"),
+            OsString::from("rpc"),
+            OsString::from("--session-dir"),
+            session_dir.as_os_str().to_owned(),
+        ],
+    )
+}
+
+fn forward_events(
+    supervisor: RpcSupervisor,
+    events: broadcast::Sender<Value>,
+    stopped: Arc<AtomicBool>,
+) {
     tokio::spawn(async move {
         loop {
             let event = match supervisor.next_event().await {
@@ -125,6 +171,9 @@ fn forward_events(supervisor: RpcSupervisor, events: broadcast::Sender<Value>) {
                 Err(error) => json!({ "type": "bridge_error", "message": error.to_string() }),
             };
             let is_terminal = event.get("type") == Some(&Value::String("bridge_error".into()));
+            if stopped.load(Ordering::Relaxed) {
+                return;
+            }
             let _ = events.send(event);
             if is_terminal {
                 return;
@@ -144,7 +193,25 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{AgentBridge, BridgeError};
+    use super::{pi_command, AgentBridge, BridgeError};
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn starts_pi_through_the_users_zsh_environment_on_macos() {
+        let session_dir = Path::new("/tmp/pi app/sessions");
+        let (command, arguments) = pi_command(session_dir);
+
+        assert_eq!(command, "/bin/zsh");
+        assert_eq!(
+            arguments,
+            [
+                OsString::from("-ilc"),
+                OsString::from("exec pi --mode rpc --session-dir \"$1\""),
+                OsString::from("pi-app-rpc"),
+                OsString::from("/tmp/pi app/sessions"),
+            ]
+        );
+    }
 
     #[tokio::test]
     async fn bridges_fake_pi_responses_events_and_abort() {

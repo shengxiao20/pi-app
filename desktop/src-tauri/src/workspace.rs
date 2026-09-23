@@ -129,14 +129,6 @@ impl WorkspaceStore {
         })
     }
 
-    pub fn delete_session(&self, session_path: PathBuf) -> Result<(), WorkspaceError> {
-        if !self.session_for_current_project(&session_path)? {
-            return Err(WorkspaceError::SessionOutsideCurrentProject(session_path));
-        }
-        fs::remove_file(session_path)?;
-        Ok(())
-    }
-
     fn read_session(&self, path: PathBuf) -> Result<PersistedSession, WorkspaceError> {
         if !self.session_for_current_project(&path)? {
             return Err(WorkspaceError::SessionOutsideCurrentProject(path));
@@ -250,7 +242,7 @@ fn read_history_tail(
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkspaceError, WorkspaceStore};
+    use super::WorkspaceStore;
     use std::{
         fs,
         sync::atomic::{AtomicUsize, Ordering},
@@ -401,58 +393,6 @@ mod tests {
                 has_more: true,
             }
         );
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn lists_and_deletes_only_sessions_from_the_handoff_directory_and_current_project() {
-        let root = temporary_root();
-        let cwd = root.join("project");
-        let handoff_sessions = root.join("custom-pi-sessions");
-        let default_sessions = root.join("default-pi-sessions");
-        fs::create_dir_all(&cwd).unwrap();
-        fs::create_dir_all(&handoff_sessions).unwrap();
-        fs::create_dir_all(&default_sessions).unwrap();
-        let store = WorkspaceStore::new(cwd.clone(), handoff_sessions.clone());
-        let current = handoff_sessions.join("current.jsonl");
-        let foreign = handoff_sessions.join("foreign.jsonl");
-        let ignored_default = default_sessions.join("ignored.jsonl");
-        fs::write(
-            &current,
-            format!(
-                "{{\"type\":\"session\",\"id\":\"current\",\"cwd\":\"{}\"}}\n{{\"type\":\"session_info\",\"name\":\"Terminal session\"}}\n",
-                cwd.display()
-            ),
-        )
-        .unwrap();
-        fs::write(
-            &foreign,
-            "{\"type\":\"session\",\"id\":\"foreign\",\"cwd\":\"/other\"}\n",
-        )
-        .unwrap();
-        fs::write(
-            &ignored_default,
-            format!(
-                "{{\"type\":\"session\",\"id\":\"ignored\",\"cwd\":\"{}\"}}\n",
-                cwd.display()
-            ),
-        )
-        .unwrap();
-
-        assert_eq!(
-            store.list_sessions().unwrap(),
-            vec![super::PersistedSession {
-                id: "current".to_owned(),
-                path: current.clone(),
-                title: "Terminal session".to_owned(),
-            }]
-        );
-        store.delete_session(current.clone()).unwrap();
-        assert!(!current.exists());
-        assert!(matches!(
-            store.delete_session(foreign),
-            Err(WorkspaceError::SessionOutsideCurrentProject(_))
-        ));
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -11,7 +11,8 @@ export type PersistedHistoryPage = {
 
 export interface PiClient {
   startAgent(): Promise<void>;
-  currentDirectory(): Promise<string>;
+  currentDirectory(): Promise<string | null>;
+  chooseWorkspace(): Promise<string | null>;
   sendRpc(request: RpcRecord): Promise<RpcRecord>;
   abortAgent(): Promise<RpcRecord>;
   listen(handler: (event: RpcRecord) => void): Promise<() => void>;
@@ -21,7 +22,6 @@ export interface PiClient {
     before: number,
     limit: number,
   ): Promise<PersistedHistoryPage>;
-  deleteSession(sessionPath: string): Promise<void>;
 }
 
 export type PersistedSession = {
@@ -32,13 +32,13 @@ export type PersistedSession = {
 
 export const tauriPiClient: PiClient = {
   startAgent: () => invoke("start_agent"),
-  currentDirectory: () => invoke("current_directory"),
+  currentDirectory: () => invoke<string | null>("current_directory"),
+  chooseWorkspace: () => invoke<string | null>("choose_workspace"),
   sendRpc: (request) => invoke("send_rpc", { request }),
   abortAgent: () => invoke("abort_agent"),
   listSessions: () => invoke("list_sessions"),
   sessionHistory: (sessionPath, before, limit) =>
     invoke("session_history", { sessionPath, before, limit }),
-  deleteSession: (sessionPath) => invoke("delete_session", { sessionPath }),
   listen: async (handler) =>
     listen<RpcRecord>("pi-rpc-event", ({ payload }) => handler(payload)),
 };

@@ -102,15 +102,35 @@ textarea:disabled {
   min-height: 0;
 }
 
+.workspace-directory {
+  display: grid;
+  gap: 7px;
+  padding: 0 8px;
+}
+
 .current-directory {
   color: #66707d;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
   margin: 0;
   overflow: hidden;
-  padding: 0 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.change-workspace {
+  background: transparent;
+  border: 1px solid #bdbbb5;
+  color: #4a5664;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  padding: 5px;
+  text-transform: uppercase;
+}
+
+.change-workspace:not(:disabled):hover {
+  background: #e0e6e9;
 }
 
 .new-session {
@@ -163,19 +183,25 @@ textarea:disabled {
   gap: 4px;
 }
 
-.session-actions button {
+.rename-session {
+  align-items: center;
   background: transparent;
   border: 1px solid #bdbbb5;
   color: #4a5664;
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
-  letter-spacing: 0.04em;
-  padding: 4px 5px;
-  text-transform: uppercase;
+  display: inline-flex;
+  height: 25px;
+  justify-content: center;
+  padding: 4px;
+  width: 25px;
 }
 
-.session-actions button:hover {
+.rename-session:hover {
   background: #e0e6e9;
+}
+
+.rename-session svg {
+  height: 14px;
+  width: 14px;
 }
 
 .recents {

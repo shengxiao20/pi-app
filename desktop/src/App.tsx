@@ -41,9 +41,7 @@ type WorkspaceInitialization = {
   directory: string;
   sessions: WorkspaceSession[];
 };
-type SessionDialog =
-  | { kind: "rename"; session: WorkspaceSession }
-  | { kind: "delete"; session: WorkspaceSession };
+type SessionDialog = { kind: "rename"; session: WorkspaceSession };
 
 const INITIAL_SESSION_ID = "session-initial";
 const ESTIMATED_HISTORY_ENTRY_HEIGHT = 120;
@@ -145,6 +143,25 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       unlisten?.();
     };
   }, [client, handleEvent]);
+
+  async function changeWorkspace() {
+    if (status === "streaming" || status === "starting") return;
+    try {
+      const selected = await client.chooseWorkspace();
+      if (!selected) return;
+      setStatus("starting");
+      setError(undefined);
+      setDraft("");
+      const workspace = await initializeAgent(client);
+      setDirectory(workspace.directory);
+      setSessions(workspace.sessions);
+      activeSessionIdRef.current = workspace.activeSession.id;
+      setActiveSessionId(workspace.activeSession.id);
+      setStatus("ready");
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
 
   async function createSession() {
     if (!isInteractive(status)) return;
@@ -279,18 +296,6 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     }
   }
 
-  async function confirmDelete(session: WorkspaceSession) {
-    try {
-      const next = sessions.find(({ id }) => id !== session.id);
-      if (session.id === activeSessionId && next) await selectSession(next);
-      await client.deleteSession(session.sessionPath);
-      setSessions((current) => current.filter(({ id }) => id !== session.id));
-      setDialog(undefined);
-    } catch (reason) {
-      fail(setError, setStatus, reason);
-    }
-  }
-
   async function sendPrompt() {
     const message = draft.trim();
     if (!message || !activeSession || !isInteractive(status)) return;
@@ -335,9 +340,19 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           <span>PI APP</span>
         </div>
         <nav aria-label="Workspace navigation" className="workspace-navigation">
-          <p className="current-directory" title={directory}>
-            {directory}
-          </p>
+          <div className="workspace-directory">
+            <p className="current-directory" title={directory}>
+              {directory || "No workspace selected"}
+            </p>
+            <button
+              className="change-workspace"
+              disabled={status === "streaming" || status === "starting"}
+              onClick={() => void changeWorkspace()}
+              type="button"
+            >
+              Change workspace
+            </button>
+          </div>
           <button
             className="new-session"
             disabled={!isInteractive(status)}
@@ -373,29 +388,31 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                   <div className="session-actions">
                     <button
                       aria-label={`Rename session ${session.title}`}
+                      className="rename-session"
                       disabled={status === "streaming"}
                       onClick={() => setDialog({ kind: "rename", session })}
                       type="button"
                     >
-                      Rename
-                    </button>
-                    <button
-                      aria-label={`Delete session ${session.title}`}
-                      disabled={status === "streaming"}
-                      onClick={() => {
-                        if (sessions.length === 1)
-                          return fail(
-                            setError,
-                            setStatus,
-                            new Error(
-                              "Cannot delete the last workspace session",
-                            ),
-                          );
-                        setDialog({ kind: "delete", session });
-                      }}
-                      type="button"
-                    >
-                      Delete
+                      <svg
+                        aria-hidden="true"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="m4 16.5-.5 4 4-.5L19 8.5 15.5 5 4 16.5Z"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.8"
+                        />
+                        <path
+                          d="m14.5 6 3.5 3.5"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeWidth="1.8"
+                        />
+                      </svg>
                     </button>
                   </div>
                 </div>
@@ -477,22 +494,6 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             <button type="submit">Save</button>
           </div>
         </form>
-      )}
-      {dialog?.kind === "delete" && (
-        <section aria-label="Delete session" className="session-dialog">
-          <p>Delete “{dialog.session.title}”?</p>
-          <div className="actions">
-            <button onClick={() => setDialog(undefined)} type="button">
-              Cancel
-            </button>
-            <button
-              onClick={() => void confirmDelete(dialog.session)}
-              type="button"
-            >
-              Delete
-            </button>
-          </div>
-        </section>
       )}
     </main>
   );
@@ -716,8 +717,12 @@ function historyEntryKey(entry: HistoryEntry, index: number): string {
 async function initializeAgent(
   client: PiClient,
 ): Promise<WorkspaceInitialization> {
+  if (!(await client.currentDirectory()) && !(await client.chooseWorkspace())) {
+    throw new Error("Select a workspace to start Pi.");
+  }
   await client.startAgent();
   const directory = await client.currentDirectory();
+  if (!directory) throw new Error("Select a workspace before starting Pi");
   const metadata = await getSessionMetadata(client, "session-initial-state");
   const sessions = (await client.listSessions()).map(workspaceSession);
   const matchingSession = sessions.find(
@@ -961,6 +966,13 @@ function fail(
   setStatus: React.Dispatch<React.SetStateAction<ChatStatus>>,
   reason: unknown,
 ) {
-  setError(reason instanceof Error ? reason.message : String(reason));
+  const message = asRecord(reason)?.message;
+  setError(
+    reason instanceof Error
+      ? reason.message
+      : typeof message === "string"
+        ? message
+        : String(reason),
+  );
   setStatus("failed");
 }

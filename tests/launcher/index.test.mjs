@@ -104,7 +104,12 @@ test("starts the resolved desktop binary detached in the caller working director
   assert.deepEqual(spawnCall, {
     command: binaryPath,
     args: [],
-    options: { cwd, detached: true, stdio: "ignore" },
+    options: {
+      cwd,
+      detached: true,
+      env: { ...process.env, PI_APP_INHERITED_CWD: "1" },
+      stdio: "ignore",
+    },
   });
   assert.equal(unrefCalls, 1);
 });

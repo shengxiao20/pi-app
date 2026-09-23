@@ -4,6 +4,7 @@
 # Node dependencies and package output
 node_modules/
 dist/
+desktop/dist/
 coverage/
 *.tgz
 
