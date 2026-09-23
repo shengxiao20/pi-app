@@ -1,6 +1,6 @@
 {
   "name": "pi-native-app",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Native desktop client for the Pi coding-agent harness",
   "license": "MIT",
   "repository": {

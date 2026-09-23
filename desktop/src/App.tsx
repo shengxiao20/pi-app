@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import type { PersistedSession, PiClient, RpcRecord } from "./pi-client";
@@ -21,8 +15,10 @@ type ToolCall = {
   kind: "tool";
   id: string;
   name: string;
+  target?: string;
   output: string;
   isError: boolean;
+  isRunning: boolean;
 };
 type HistoryEntry = ChatMessage | ToolCall;
 type WorkspaceSession = {
@@ -42,12 +38,14 @@ type WorkspaceInitialization = {
   sessions: WorkspaceSession[];
 };
 type SessionDialog = { kind: "rename"; session: WorkspaceSession };
+type PiCommand = {
+  name: string;
+  description?: string;
+  source: "extension" | "prompt" | "skill";
+};
 
 const INITIAL_SESSION_ID = "session-initial";
-const ESTIMATED_HISTORY_ENTRY_HEIGHT = 120;
-const HISTORY_OVERSCAN_PX = 960;
 const HISTORY_PAGE_SIZE = 80;
-const HISTORY_LOAD_MORE_THRESHOLD_PX = 240;
 
 function isInteractive(status: ChatStatus): boolean {
   return status === "ready" || status === "idle";
@@ -57,12 +55,20 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [error, setError] = useState<string>();
   const [draft, setDraft] = useState("");
+  const [commands, setCommands] = useState<PiCommand[]>([]);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const [showCommands, setShowCommands] = useState(false);
+  const [hideToolCalls, setHideToolCalls] = useState(false);
   const [sessions, setSessions] = useState<WorkspaceSession[]>([]);
   const [dialog, setDialog] = useState<SessionDialog>();
   const [directory, setDirectory] = useState("");
   const [activeSessionId, setActiveSessionId] = useState(INITIAL_SESSION_ID);
   const activeSessionIdRef = useRef(INITIAL_SESSION_ID);
   const requestSequence = useRef(0);
+  const agentRunObserved = useRef(false);
+  const discoveredCommands = useRef<PiCommand[]>([]);
+  const commandDiscovery = useRef<Promise<void> | undefined>(undefined);
+  const commandGeneration = useRef(0);
   const sessionSequence = useRef(0);
   const loadingOlderSessions = useRef(new Set<string>());
   const startup = useRef<Promise<WorkspaceInitialization> | undefined>(
@@ -77,7 +83,34 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const handleEvent = useCallback((event: RpcRecord) => {
     if (event.type === "bridge_error")
       return fail(setError, setStatus, event.message);
+    if (event.type === "agent_start") {
+      agentRunObserved.current = true;
+      setStatus("streaming");
+    }
+    if (
+      event.type === "turn_start" ||
+      event.type === "message_start" ||
+      event.type === "compaction_start" ||
+      event.type === "auto_retry_start"
+    )
+      setStatus("streaming");
+    const notification = event.message;
+    if (
+      event.type === "extension_ui_request" &&
+      event.method === "notify" &&
+      typeof notification === "string"
+    ) {
+      updateSession(activeSessionIdRef.current, setSessions, (session) => ({
+        ...session,
+        history: [
+          ...session.history,
+          { kind: "message", role: "assistant", text: notification },
+        ],
+      }));
+      return;
+    }
     if (event.type === "message_update") {
+      setStatus("streaming");
       const update = asRecord(event.assistantMessageEvent);
       if (update?.type === "text_delta" && typeof update.delta === "string") {
         updateSession(activeSessionIdRef.current, setSessions, (session) => ({
@@ -92,6 +125,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       typeof event.toolCallId === "string" &&
       typeof event.toolName === "string"
     ) {
+      setStatus("streaming");
       updateSession(activeSessionIdRef.current, setSessions, (session) => ({
         ...session,
         history: [
@@ -100,8 +134,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             kind: "tool",
             id: event.toolCallId as string,
             name: event.toolName as string,
+            target: toolTarget(event.toolName, event.args),
             output: "",
             isError: false,
+            isRunning: true,
           },
         ],
       }));
@@ -152,6 +188,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       setStatus("starting");
       setError(undefined);
       setDraft("");
+      resetCommandDiscovery();
       const workspace = await initializeAgent(client);
       setDirectory(workspace.directory);
       setSessions(workspace.sessions);
@@ -306,7 +343,12 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         { kind: "message", role: "user", text: message },
       ],
     }));
+    const extensionCommand = message.startsWith("/")
+      ? (await loadCommands(),
+        isExtensionCommand(message, discoveredCommands.current))
+      : false;
     setDraft("");
+    agentRunObserved.current = false;
     setStatus("streaming");
     try {
       assertResponse(
@@ -317,6 +359,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         }),
         "send prompt",
       );
+      if (extensionCommand && !agentRunObserved.current) setStatus("idle");
     } catch (reason) {
       fail(setError, setStatus, reason);
     }
@@ -328,6 +371,39 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     } catch (reason) {
       fail(setError, setStatus, reason);
     }
+  }
+
+  function resetCommandDiscovery() {
+    commandGeneration.current += 1;
+    discoveredCommands.current = [];
+    commandDiscovery.current = undefined;
+    setCommands([]);
+    setCommandIndex(0);
+    setShowCommands(false);
+  }
+
+  function loadCommands(): Promise<void> {
+    if (commandDiscovery.current) return commandDiscovery.current;
+    const generation = commandGeneration.current;
+    commandDiscovery.current = getCommands(client, "get-commands-0")
+      .then((availableCommands) => {
+        if (generation !== commandGeneration.current) return;
+        discoveredCommands.current = availableCommands;
+        setCommands(availableCommands);
+      })
+      .catch((reason) => {
+        if (generation !== commandGeneration.current) return;
+        commandDiscovery.current = undefined;
+        fail(setError, setStatus, reason);
+      });
+    return commandDiscovery.current;
+  }
+
+  const matchingCommands = showCommands ? matchCommands(commands, draft) : [];
+  function selectCommand(command: PiCommand) {
+    setDraft(`/${command.name} `);
+    setCommandIndex(0);
+    setShowCommands(false);
   }
 
   return (
@@ -427,12 +503,21 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             <p className="eyebrow">CONVERSATION</p>
             <h1>{activeSession?.title || "Connecting to Pi"}</h1>
           </div>
+          <button
+            aria-pressed={hideToolCalls}
+            className="tool-visibility-toggle"
+            onClick={() => setHideToolCalls((hidden) => !hidden)}
+            type="button"
+          >
+            {hideToolCalls ? "Show tool calls" : "Hide tool calls"}
+          </button>
         </header>
         {error && <p role="alert">{error}</p>}
         <Conversation
           hasMoreHistory={activeSession?.hasMoreHistory ?? false}
           history={activeSession?.history ?? []}
           historyLoading={activeSession?.historyLoading ?? false}
+          hideToolCalls={hideToolCalls}
           key={activeSessionId}
           onLoadOlder={loadOlderHistory}
           status={status}
@@ -448,28 +533,97 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             Message
           </label>
           <textarea
+            aria-autocomplete="list"
+            aria-activedescendant={
+              matchingCommands.length
+                ? `slash-command-${commandIndex}`
+                : undefined
+            }
+            aria-controls="slash-commands"
+            aria-expanded={matchingCommands.length > 0}
             disabled={!isInteractive(status)}
             id="prompt"
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setDraft(value);
+              setCommandIndex(0);
+              setShowCommands(value.startsWith("/"));
+              if (value.startsWith("/")) void loadCommands();
+            }}
+            onKeyDown={(event) => {
+              if (!matchingCommands.length) return;
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setCommandIndex(
+                  (index) => (index + 1) % matchingCommands.length,
+                );
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setCommandIndex(
+                  (index) =>
+                    (index + matchingCommands.length - 1) %
+                    matchingCommands.length,
+                );
+              }
+              if (event.key === "Enter") {
+                event.preventDefault();
+                selectCommand(
+                  matchingCommands[commandIndex] ?? matchingCommands[0],
+                );
+              }
+              if (event.key === "Escape") setShowCommands(false);
+            }}
             placeholder="Message Pi about this project…"
+            role="combobox"
             value={draft}
           />
+          {matchingCommands.length > 0 && (
+            <ul
+              aria-label="Pi commands"
+              className="slash-commands"
+              id="slash-commands"
+              role="listbox"
+            >
+              {matchingCommands.map((command, index) => (
+                <li
+                  aria-selected={index === commandIndex}
+                  id={`slash-command-${index}`}
+                  key={command.name}
+                  role="option"
+                >
+                  <button onClick={() => selectCommand(command)} type="button">
+                    <strong>/{command.name}</strong>
+                    {command.description && <span>{command.description}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="composer-footer">
-            <div className="actions">
+            {status === "streaming" ? (
               <button
-                disabled={status !== "streaming"}
+                aria-label="Stop generating"
+                className="composer-action composer-stop"
                 onClick={() => void abort()}
                 type="button"
               >
-                Stop
+                <svg aria-hidden="true" viewBox="0 0 16 16">
+                  <rect height="8" rx="1" width="8" x="4" y="4" />
+                </svg>
               </button>
+            ) : (
               <button
+                aria-label="Send message"
+                className="composer-action composer-send"
                 disabled={!isInteractive(status) || !draft.trim()}
                 type="submit"
               >
-                Send <span aria-hidden="true">↑</span>
+                <svg aria-hidden="true" viewBox="0 0 16 16">
+                  <path d="m3 8 10-5-3 10-2-4-5-1Z" />
+                </svg>
               </button>
-            </div>
+            )}
           </div>
         </form>
       </section>
@@ -499,94 +653,61 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   );
 }
 
+async function getCommands(client: PiClient, id: string): Promise<PiCommand[]> {
+  const response = await client.sendRpc({ id, type: "get_commands" });
+  assertResponse(response, "get commands");
+  const data = asRecord(response.data);
+  const commands = data?.commands;
+  if (!Array.isArray(commands)) throw new Error("Pi returned invalid commands");
+  return commands.map((command) => {
+    const value = asRecord(command);
+    if (
+      !value ||
+      typeof value.name !== "string" ||
+      (value.source !== "extension" &&
+        value.source !== "prompt" &&
+        value.source !== "skill")
+    )
+      throw new Error("Pi returned invalid command");
+    return {
+      name: value.name,
+      description:
+        typeof value.description === "string" ? value.description : undefined,
+      source: value.source,
+    };
+  });
+}
+
+function matchCommands(commands: PiCommand[], draft: string): PiCommand[] {
+  if (!draft.startsWith("/") || /\s/.test(draft)) return [];
+  const query = draft.slice(1).toLowerCase();
+  return commands.filter(({ name }) => name.toLowerCase().includes(query));
+}
+
+function isExtensionCommand(message: string, commands: PiCommand[]): boolean {
+  const name = /^\/([^\s]+)/.exec(message)?.[1];
+  return commands.some(
+    (command) => command.source === "extension" && command.name === name,
+  );
+}
+
 function Conversation({
   history,
   status,
   hasMoreHistory,
   historyLoading,
+  hideToolCalls,
   onLoadOlder,
 }: {
   history: HistoryEntry[];
   status: ChatStatus;
   hasMoreHistory: boolean;
   historyLoading: boolean;
+  hideToolCalls: boolean;
   onLoadOlder: () => void;
 }) {
-  const container = useRef<HTMLElement>(null);
-  const heights = useRef(new Map<number, number>());
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
-  const followsLatest = useRef(true);
-  const expectedLatestScrollTop = useRef<number | undefined>(undefined);
-  const [, updateMeasuredHeights] = useState(0);
-  const offsets = [0];
-  for (let index = 0; index < history.length; index += 1)
-    offsets.push(
-      offsets[index] +
-        (heights.current.get(index) ?? ESTIMATED_HISTORY_ENTRY_HEIGHT),
-    );
-  const totalHeight = offsets.at(-1) ?? 0;
-  const start = firstVisibleIndex(offsets, scrollTop - HISTORY_OVERSCAN_PX);
-  const end = firstVisibleIndex(
-    offsets,
-    scrollTop + viewportHeight + HISTORY_OVERSCAN_PX,
-  );
-  const visibleHistory = history.slice(
-    start,
-    Math.min(end + 1, history.length),
-  );
-
-  useEffect(() => {
-    const element = container.current;
-    if (!element) return;
-    const observer = new ResizeObserver(() =>
-      setViewportHeight(element.clientHeight),
-    );
-    observer.observe(element);
-    setViewportHeight(element.clientHeight);
-    return () => observer.disconnect();
-  }, []);
-
-  useLayoutEffect(() => {
-    followsLatest.current = true;
-    expectedLatestScrollTop.current = undefined;
-  }, []);
-
-  useLayoutEffect(() => {
-    const element = container.current;
-    if (!element || !followsLatest.current) return;
-    const latestOffset = Math.max(totalHeight - element.clientHeight, 0);
-    expectedLatestScrollTop.current = latestOffset;
-    element.scrollTop = latestOffset;
-    setScrollTop(latestOffset);
-  }, [totalHeight, viewportHeight]);
-
   return (
-    <section
-      aria-label="Conversation"
-      className="conversation"
-      onScroll={(event) => {
-        const element = event.currentTarget;
-        if (element.scrollTop === expectedLatestScrollTop.current) {
-          setScrollTop(element.scrollTop);
-          return;
-        }
-        expectedLatestScrollTop.current = undefined;
-        if (
-          element.scrollTop <= HISTORY_LOAD_MORE_THRESHOLD_PX &&
-          hasMoreHistory &&
-          !historyLoading
-        ) {
-          followsLatest.current = false;
-          onLoadOlder();
-        } else
-          followsLatest.current =
-            element.scrollTop >=
-            element.scrollHeight - element.clientHeight - 1;
-        setScrollTop(element.scrollTop);
-      }}
-      ref={container}
-    >
+    <section aria-label="Conversation" className="conversation">
       {!history.length && !historyLoading && status !== "starting" && (
         <div className="empty-state">
           <span className="empty-orb">✦</span>
@@ -597,24 +718,28 @@ function Conversation({
           </p>
         </div>
       )}
-      <div className="virtual-history" style={{ height: totalHeight }}>
-        <div style={{ transform: `translateY(${offsets[start]}px)` }}>
-          {visibleHistory.map((entry, index) => {
-            const historyIndex = start + index;
-            return (
-              <MeasuredHistoryEntry
+      {hasMoreHistory && (
+        <button
+          className="load-older-history"
+          disabled={historyLoading}
+          onClick={onLoadOlder}
+          type="button"
+        >
+          {historyLoading
+            ? "Loading earlier messages…"
+            : "Load earlier messages"}
+        </button>
+      )}
+      <div className="history">
+        {history.map(
+          (entry, index) =>
+            (!hideToolCalls || entry.kind === "message") && (
+              <HistoryEntryView
                 entry={entry}
-                index={historyIndex}
-                key={historyEntryKey(entry, historyIndex)}
-                onMeasured={(height) => {
-                  if (heights.current.get(historyIndex) === height) return;
-                  heights.current.set(historyIndex, height);
-                  updateMeasuredHeights((current) => current + 1);
-                }}
+                key={historyEntryKey(entry, index)}
               />
-            );
-          })}
-        </div>
+            ),
+        )}
       </div>
       {historyLoading && (
         <div
@@ -625,7 +750,7 @@ function Conversation({
           <span aria-hidden="true" /> Loading latest history…
         </div>
       )}
-      {status === "streaming" && (
+      {(status === "streaming" || history.some(isRunningTool)) && (
         <div
           aria-label="Pi is working"
           className="thinking-indicator"
@@ -635,38 +760,6 @@ function Conversation({
         </div>
       )}
     </section>
-  );
-}
-
-function MeasuredHistoryEntry({
-  entry,
-  index,
-  onMeasured,
-}: {
-  entry: HistoryEntry;
-  index: number;
-  onMeasured: (height: number) => void;
-}) {
-  const element = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const current = element.current;
-    if (!current) return;
-    const observer = new ResizeObserver(([measurement]) =>
-      onMeasured(
-        measurement.borderBoxSize[0]?.blockSize ?? current.offsetHeight,
-      ),
-    );
-    observer.observe(current);
-    return () => observer.disconnect();
-  }, [onMeasured]);
-  return (
-    <div
-      className="virtual-history-entry"
-      data-history-index={index}
-      ref={element}
-    >
-      <HistoryEntryView entry={entry} />
-    </div>
   );
 }
 
@@ -690,22 +783,14 @@ function HistoryEntryView({ entry }: { entry: HistoryEntry }) {
       <summary>
         <span aria-hidden="true">⌘</span>
         <span>{entry.name}</span>
-        <em>{entry.isError ? "failed" : "completed"}</em>
+        {entry.target && <code>{entry.target}</code>}
+        <em>
+          {entry.isRunning ? "running" : entry.isError ? "failed" : "completed"}
+        </em>
       </summary>
       <pre>{entry.output || "Running…"}</pre>
     </details>
   );
-}
-
-function firstVisibleIndex(offsets: number[], position: number): number {
-  let lower = 0;
-  let upper = offsets.length - 1;
-  while (lower < upper) {
-    const middle = Math.ceil((lower + upper) / 2);
-    if (offsets[middle] <= position) lower = middle;
-    else upper = middle - 1;
-  }
-  return lower;
 }
 
 function historyEntryKey(entry: HistoryEntry, index: number): string {
@@ -868,8 +953,10 @@ function mapHistory(messages: unknown[]): HistoryEntry[] {
               kind: "tool",
               id: toolCall.id,
               name: toolCall.name,
+              target: toolTarget(toolCall.name, toolCall.arguments),
               output: "",
               isError: false,
+              isRunning: true,
             });
         }
       continue;
@@ -885,6 +972,7 @@ function mapHistory(messages: unknown[]): HistoryEntry[] {
         ...history[index],
         output,
         isError: record.isError === true,
+        isRunning: false,
       };
   }
   return history;
@@ -951,10 +1039,31 @@ function updateTool(
     ...session,
     history: session.history.map((entry) =>
       entry.kind === "tool" && entry.id === event.toolCallId
-        ? { ...entry, output, isError: event.isError === true }
+        ? {
+            ...entry,
+            target: toolTarget(event.toolName, event.args) ?? entry.target,
+            output,
+            isError: event.isError === true,
+            isRunning: event.type !== "tool_execution_end",
+          }
         : entry,
     ),
   }));
+}
+function isRunningTool(entry: HistoryEntry): entry is ToolCall {
+  return entry.kind === "tool" && entry.isRunning;
+}
+function toolTarget(name: unknown, args: unknown): string | undefined {
+  const values = asRecord(args);
+  if (!values || typeof name !== "string") return undefined;
+  if (
+    (name === "read" || name === "edit" || name === "write") &&
+    typeof values.path === "string"
+  )
+    return values.path;
+  if (name === "bash" && typeof values.command === "string")
+    return values.command;
+  return undefined;
 }
 function asRecord(value: unknown): RpcRecord | undefined {
   return typeof value === "object" && value !== null

@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedHistoryPage {
     pub messages: Vec<Value>,
     pub before: usize,
@@ -340,6 +341,23 @@ mod tests {
             }
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn serializes_history_page_fields_for_the_frontend_ipc_contract() {
+        assert_eq!(
+            serde_json::to_value(super::PersistedHistoryPage {
+                messages: vec![],
+                before: 64,
+                has_more: true,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "messages": [],
+                "before": 64,
+                "hasMore": true,
+            })
+        );
     }
 
     #[test]
