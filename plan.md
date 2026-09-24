@@ -6,7 +6,7 @@
 
 - **仓库**：https://github.com/shengxiao20/pi-app
 - **参与者**：`Michael`、`Collaborator`（第二位参与者 GitHub 用户名待填写）
-- **当前任务**：无。PIA-078 已完成：发布元数据、文档及 signed native bundle 已同步至 0.1.5。
+- **当前任务**：PIA-080 In Progress（Michael）：将 Pi Native App 技术底稿制作成适合小红书手机截图的分页 HTML。
 
 ### 状态定义
 
@@ -98,6 +98,8 @@
 | PIA-075 | 增加历史会话工具调用内容的显示/隐藏开关。 | Michael | Done | 默认显示工具调用，conversation header 中的 **Hide tool calls** 为操作标签；点击后按钮变为 **Show tool calls**（`aria-pressed=true`），仅隐藏工具调用卡片、目标与输出，保留 user/assistant 文本、分页、实时运行状态及全部已加载 history state；再次点击立即恢复原数据。未修改 Pi JSONL 或 Tauri IPC。README、样式与前端回归已更新。验证：root 11/11、desktop 36/36、Rust 16/16、typecheck、Prettier、cargo fmt/clippy、diff check、native build 和 codesign 通过；已重启本地 app，bundle SHA-1 `05f5951906cf1edd32ecebcc63d18bffa676d350`。 | 待提交 |
 | PIA-076 | 修复 fresh session 执行 Pi extension command 后永久显示工作状态的问题。 | Michael | Done | 截图实际提交 `/pi-session-memory-whats-new`（extension command，不是 `/skill`）。隔离 Pi RPC 实测：该命令返回 prompt success 并发出 `extension_ui_request` 的 `notify`，但正常地不发 `agent_settled`。前端此前对所有 prompt 等待 `agent_settled`，且忽略 notify，导致永久 `Pi is working…`。现仅对通过官方 `get_commands` 精确发现的 extension command，在 prompt success 且未观察到 `agent_start` 时恢复 idle；Pi `notify` 内容会显示在 workspace。直接完整输入 slash command 时也会等待同一次 command discovery 后分类，不要求点选 completion。未自动回应 `select`/`confirm`/`input`/`editor` extension UI 请求。README 与前端回归已更新。验证：root 11/11、desktop 37/37、Rust 16/16、typecheck、Prettier、cargo fmt/clippy、diff check、native build 和 codesign 通过；已重启本地 app，bundle SHA-1 `939cdce99565f4b822210acf3431beaf528fcde7`。 | 待提交 |
 | PIA-077 | 将 Pi extension command 的 notify 输出归入对应会话对话流。 | Michael | Done | 根据截图，之前的全局 `notifications` 数组将 command 输出放在 conversation 外且持续跨命令累积。现移除该 DOM/CSS，将 Pi 提供的 `extension_ui_request(method: notify)` 追加至当前 active session 的 runtime history，按标准 Pi assistant message 显示在对应 `/command` 后；会话切换不串结果。没有制造或写入 JSONL，notify 仅存在运行中 state。README 与回归已更新，测试同时确认 `.message-assistant` 内存在输出且 `.extension-notification` 不存在。验证：root 11/11、desktop 37/37、Rust 16/16、typecheck、Prettier、cargo fmt/clippy、diff check、native build 和 codesign 通过；已重启本地 app，bundle SHA-1 `e684f822e15744fa86d84165fb04e9b493cc15ee`。 | 待提交 |
+| PIA-079 | 校对并补全 Obsidian 中 Pi Native App 技术底稿的问答，确保每题一段且与当前实现一致。 | Michael | Done | 已在 `/Users/I604724/Documents/Obsidian Vault/pi native app.md` 为 7 个问题补充或校正为单段回答：`/app` 调用链、Web/桌面边界、独立 RPC session 的并发边界、80 条反向分页、取消 handoff 的原因、streaming 时 Stop 交互、`get_commands` 范围及 extension notify 的会话内呈现。基于 CodeGraph 对现有实现核验；`git diff --check` 通过。 | 本地文档任务，未提交 |
+| PIA-080 | 将 Pi Native App 技术底稿制作成适合小红书手机截图的分页 HTML。 | Michael | In Progress | 同一 Obsidian Vault 中交付独立 HTML；按手机竖屏逐页呈现，使用 SVG/CSS 绘制装饰与信息图，不依赖外部图片或网络；全部底稿问题及已校正文案可读。 | 待提交 |
 | PIA-078 | 发布版本升级至 0.1.5，并同步相关元数据与文档。 | Michael | Done | root/desktop/platform npm manifests 与 lockfile、Cargo crate/lockfile、Tauri config、macOS `CFBundleShortVersionString`/`CFBundleVersion` 均同步为 0.1.5；README 顶部标注当前 release。历史 PIA 任务中的 0.1.4 验收证据保持不变。已重建、签名并重启 native app；`Info.plist` 两个 bundle version 字段均实测为 0.1.5。验证：root 11/11、desktop 37/37、Rust 16/16、typecheck、Prettier、cargo fmt/clippy、diff check、native build 和 codesign 通过；bundle SHA-1 `d01550194839020f191453bbce8ef353c4442721`。 | 待提交 |
 
 ### 任务更新格式

@@ -135,6 +135,29 @@ describe("App", () => {
     );
   });
 
+  it("does not keep working feedback after Pi settles with an unfinished tool", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+    await screen.findByText("CONVERSATION");
+
+    fake.emit({
+      type: "tool_execution_start",
+      toolCallId: "interrupted-read",
+      toolName: "read",
+      args: { path: "package.json" },
+    });
+    expect(
+      await screen.findByRole("status", { name: "Pi is working" }),
+    ).toBeTruthy();
+
+    fake.emit({ type: "agent_settled" });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("status", { name: "Pi is working" }),
+      ).toBeNull(),
+    );
+  });
+
   it("settles an extension command and renders its Pi notification without an agent run", async () => {
     const fake = createClient();
     fake.client.sendRpc = vi

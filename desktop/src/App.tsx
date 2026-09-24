@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 
 import type { PersistedSession, PiClient, RpcRecord } from "./pi-client";
@@ -706,8 +712,21 @@ function Conversation({
   hideToolCalls: boolean;
   onLoadOlder: () => void;
 }) {
+  const conversation = useRef<HTMLElement>(null);
+  const positionedAtLatest = useRef(false);
+
+  useLayoutEffect(() => {
+    if (historyLoading || !history.length || positionedAtLatest.current) return;
+    conversation.current!.scrollTop = conversation.current!.scrollHeight;
+    positionedAtLatest.current = true;
+  }, [history.length, historyLoading]);
+
   return (
-    <section aria-label="Conversation" className="conversation">
+    <section
+      aria-label="Conversation"
+      className="conversation"
+      ref={conversation}
+    >
       {!history.length && !historyLoading && status !== "starting" && (
         <div className="empty-state">
           <span className="empty-orb">✦</span>
@@ -750,7 +769,7 @@ function Conversation({
           <span aria-hidden="true" /> Loading latest history…
         </div>
       )}
-      {(status === "streaming" || history.some(isRunningTool)) && (
+      {status === "streaming" && (
         <div
           aria-label="Pi is working"
           className="thinking-indicator"
@@ -1049,9 +1068,6 @@ function updateTool(
         : entry,
     ),
   }));
-}
-function isRunningTool(entry: HistoryEntry): entry is ToolCall {
-  return entry.kind === "tool" && entry.isRunning;
 }
 function toolTarget(name: unknown, args: unknown): string | undefined {
   const values = asRecord(args);
