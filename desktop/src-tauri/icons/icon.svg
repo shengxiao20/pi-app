@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title>Pi App</title>
+  <rect x="48" y="48" width="928" height="928" rx="208" fill="#f7f5f1"/>
+  <path fill="#e98c78" d="M220 240H804V348H220Z"/>
+  <path fill="#5a9abf" d="M280 348H406V788H280Z"/>
+  <path fill="#ecc261" d="M618 348H744V788H618Z"/>
+</svg>

@@ -4,11 +4,14 @@
 # Node dependencies and package output
 node_modules/
 dist/
+desktop/dist/
 coverage/
+*.tgz
 
 # Rust and Tauri build output
 target/
 desktop/src-tauri/target/
+desktop/src-tauri/gen/
 
 # Environment and local editor state
 .env
