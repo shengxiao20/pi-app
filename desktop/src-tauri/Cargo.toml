@@ -1,6 +1,6 @@
 [package]
 name = "pi-app-desktop"
-version = "0.1.5"
+version = "0.1.6"
 description = "Pi App desktop client"
 authors = ["Pi App contributors"]
 edition = "2021"
