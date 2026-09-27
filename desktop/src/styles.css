@@ -516,6 +516,28 @@ h1 {
   padding-left: 24px;
 }
 
+.markdown table {
+  border-collapse: collapse;
+  display: block;
+  margin: 0 0 12px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid #d2d0ca;
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: #e8e7e2;
+  font-weight: 600;
+}
+
 .markdown code {
   background: #e8e7e2;
   border: 1px solid #d2d0ca;

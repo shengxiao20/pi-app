@@ -40,6 +40,15 @@ describe("desktop layout", () => {
     );
   });
 
+  it("keeps wide Markdown tables readable through horizontal scrolling", () => {
+    expect(styles).toMatch(
+      /\.markdown table\s*\{[^}]*display:\s*block[^}]*max-width:\s*100%[^}]*overflow-x:\s*auto[^}]*white-space:\s*nowrap/s,
+    );
+    expect(styles).toMatch(
+      /\.markdown th,[\s\S]*?\.markdown td\s*\{[^}]*border:\s*1px solid #d2d0ca[^}]*padding:\s*6px 10px/s,
+    );
+  });
+
   it("styles the explicit older-history control", () => {
     expect(styles).toMatch(
       /\.load-older-history\s*\{[^}]*cursor:\s*pointer[^}]*margin:\s*0 auto 18px/s,

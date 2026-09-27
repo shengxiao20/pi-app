@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import type { PersistedSession, PiClient, RpcRecord } from "./pi-client";
 import { tauriPiClient } from "./pi-client";
@@ -791,7 +792,9 @@ function HistoryEntryView({ entry }: { entry: HistoryEntry }) {
       <div>
         <strong>{entry.role === "user" ? "You" : "Pi"}</strong>
         <div className="markdown">
-          <ReactMarkdown>{entry.text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {normalizeMarkdown(entry.text)}
+          </ReactMarkdown>
         </div>
       </div>
     </article>
@@ -996,6 +999,37 @@ function mapHistory(messages: unknown[]): HistoryEntry[] {
   }
   return history;
 }
+function normalizeMarkdown(text: string): string {
+  const delimiter = /\|(?:\s*:?-{3,}:?\s*\|)+/;
+  const match = delimiter.exec(text);
+  if (!match) return text;
+
+  const tableStart = text.lastIndexOf("\n", match.index) + 1;
+  const beforeTable = text.slice(0, tableStart);
+  const flattenedTable = text.slice(tableStart).trim();
+  if (flattenedTable.includes("\n")) return text;
+
+  const columnCount = match[0].split("|").filter(Boolean).length;
+  const cells = flattenedTable
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter(Boolean);
+  if (cells.length < columnCount * 2) return text;
+
+  const rows = cells
+    .filter((_, index) => index < columnCount || index >= columnCount * 2)
+    .reduce<string[]>((result, cell, index) => {
+      if (index % columnCount === 0) result.push("");
+      result[result.length - 1] += `| ${cell} `;
+      return result;
+    }, [])
+    .map((row) => `${row}|`);
+  if (rows.some((row) => row.split("|").length - 2 !== columnCount))
+    return text;
+
+  return `${beforeTable}${rows[0]}\n${match[0]}\n${rows.slice(1).join("\n")}`;
+}
+
 function messageText(content: unknown): string {
   if (typeof content === "string") return content;
   return Array.isArray(content)

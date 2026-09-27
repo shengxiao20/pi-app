@@ -86,6 +86,32 @@ function createClient() {
 describe("App", () => {
   afterEach(() => cleanup());
 
+  it("reconstructs flattened GFM tables from persisted Pi messages", async () => {
+    const fake = createClient();
+    fake.client.sessionHistory = vi.fn().mockResolvedValue(
+      historyPage([
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "| Dimension | LangChain | LangGraph | | --- | --- | --- | | Core | General LLM framework | Stateful agent graph | | Workflow | Chains | Directed graph |",
+            },
+          ],
+        },
+      ]),
+    );
+    render(<App client={fake.client} />);
+
+    expect(await screen.findByRole("table")).toBeTruthy();
+    expect(
+      screen.getByRole("columnheader", { name: "Dimension" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("cell", { name: "Stateful agent graph" }),
+    ).toBeTruthy();
+  });
+
   it("renders the active persisted Pi RPC session history", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);
