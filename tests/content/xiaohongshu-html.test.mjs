@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const documentPath = "/Users/I604724/Documents/Obsidian Vault/pi-native-app-xiaohongshu.html";
+const documentPath = fileURLToPath(
+  new URL("../fixtures/pi-native-app-xiaohongshu.html", import.meta.url),
+);
 
 test("Xiaohongshu copy is a self-contained mobile paged HTML document", () => {
   assert.ok(existsSync(documentPath), "the Xiaohongshu HTML document exists");

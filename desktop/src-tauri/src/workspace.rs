@@ -307,6 +307,37 @@ mod tests {
     }
 
     #[test]
+    fn refuses_history_from_another_project_session_root() {
+        let root = temporary_root();
+        let first_cwd = root.join("first-project");
+        let second_cwd = root.join("second-project");
+        let first_sessions = root.join("first-sessions");
+        let second_sessions = root.join("second-sessions");
+        fs::create_dir_all(&first_cwd).unwrap();
+        fs::create_dir_all(&second_cwd).unwrap();
+        fs::create_dir_all(&first_sessions).unwrap();
+        fs::create_dir_all(&second_sessions).unwrap();
+        let second_session = second_sessions.join("second.jsonl");
+        fs::write(
+            &second_session,
+            format!(
+                "{{\"type\":\"session\",\"id\":\"second\",\"cwd\":\"{}\"}}\\n",
+                second_cwd.display()
+            ),
+        )
+        .unwrap();
+
+        let error = WorkspaceStore::new(first_cwd, first_sessions)
+            .session_history(second_session.clone(), None, 80)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            super::WorkspaceError::SessionOutsideCurrentProject(path) if path == second_session
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn reads_every_persisted_message_in_chronological_order() {
         let root = temporary_root();
         let cwd = root.join("project");

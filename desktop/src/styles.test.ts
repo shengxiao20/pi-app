@@ -5,6 +5,23 @@ import { describe, expect, it } from "vitest";
 const styles = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
 
 describe("desktop layout", () => {
+  it("keeps keyboard focus visibly distinct from the selected navigation item", () => {
+    expect(styles).toMatch(
+      /button:focus-visible,[\s\S]*?textarea:focus-visible\s*\{[^}]*outline:\s*3px solid #ba4b2f/s,
+    );
+  });
+
+  it("keeps top New chat fixed above Projects and visible Recents", () => {
+    expect(styles).toMatch(
+      /\.workspace-navigation\s*\{[\s\S]*?grid-template-rows:\s*40px minmax\(0,\s*1fr\) minmax\(112px,\s*0\.8fr\)/s,
+    );
+    expect(styles).toMatch(
+      /\.new-session\s*\{[\s\S]*?height:\s*40px[\s\S]*?min-height:\s*40px/s,
+    );
+    expect(styles).toMatch(/\.project-navigation\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(styles).toMatch(/\.recents\s*\{[^}]*min-height:\s*112px/s);
+  });
+
   it("styles the rename control as an icon button", () => {
     expect(styles).toMatch(/\.rename-session\s*\{[^}]*height:\s*25px/s);
     expect(styles).toMatch(/\.rename-session svg\s*\{[^}]*width:\s*14px/s);

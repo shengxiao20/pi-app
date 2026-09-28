@@ -2,15 +2,37 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useReducer,
   useRef,
   useState,
 } from "react";
 import ReactMarkdown from "react-markdown";
 
-import type { PersistedSession, PiClient, RpcRecord } from "./pi-client";
+import type {
+  PersistedSession,
+  PiClient,
+  Project,
+  RpcRecord,
+  RuntimeEvent,
+  ProjectRuntimeSnapshot,
+} from "./pi-client";
 import { tauriPiClient } from "./pi-client";
+import {
+  createWorkspaceState,
+  isSessionInteractive,
+  projectRuntimeSummary,
+  sessionKey,
+  workspaceReducer,
+} from "./workspace-state";
 
-export type ChatStatus = "idle" | "starting" | "ready" | "streaming" | "failed";
+export type ChatStatus =
+  | "idle"
+  | "starting"
+  | "ready"
+  | "streaming"
+  | "completed"
+  | "aborted"
+  | "failed";
 
 type ChatMessage = {
   kind: "message";
@@ -39,11 +61,19 @@ type WorkspaceSession = {
   history: HistoryEntry[];
 };
 type WorkspaceInitialization = {
-  activeSession: WorkspaceSession;
+  activeSession?: WorkspaceSession;
   directory: string;
+  projectId: string;
   sessions: WorkspaceSession[];
 };
-type SessionDialog = { kind: "rename"; session: WorkspaceSession };
+type SessionDialog =
+  | { kind: "rename"; session: WorkspaceSession }
+  | { kind: "rename-project"; project: Project }
+  | {
+      kind: "remove-project";
+      project: Project;
+      snapshot: ProjectRuntimeSnapshot;
+    };
 type PiCommand = {
   name: string;
   description?: string;
@@ -53,8 +83,13 @@ type PiCommand = {
 const INITIAL_SESSION_ID = "session-initial";
 const HISTORY_PAGE_SIZE = 80;
 
-function isInteractive(status: ChatStatus): boolean {
-  return status === "ready" || status === "idle";
+function activeTarget(
+  projectId: string | undefined,
+  sessionId: string,
+): import("./pi-client").RuntimeTarget {
+  if (!projectId)
+    throw new Error("Select a project before sending Pi commands");
+  return { projectId, sessionId };
 }
 
 export default function App({ client = tauriPiClient }: { client?: PiClient }) {
@@ -66,8 +101,17 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const [showCommands, setShowCommands] = useState(false);
   const [hideToolCalls, setHideToolCalls] = useState(false);
   const [sessions, setSessions] = useState<WorkspaceSession[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [runtimeState, dispatchRuntime] = useReducer(
+    workspaceReducer,
+    undefined,
+    createWorkspaceState,
+  );
   const [dialog, setDialog] = useState<SessionDialog>();
   const [directory, setDirectory] = useState("");
+  const [projectId, setProjectId] = useState<string>();
+  const currentProject = projects.find((project) => project.id === projectId);
+  const projectIdRef = useRef<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState(INITIAL_SESSION_ID);
   const activeSessionIdRef = useRef(INITIAL_SESSION_ID);
   const requestSequence = useRef(0);
@@ -77,87 +121,144 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const commandGeneration = useRef(0);
   const sessionSequence = useRef(0);
   const loadingOlderSessions = useRef(new Set<string>());
+  const startedRuntimes = useRef(new Set<string>());
   const startup = useRef<Promise<WorkspaceInitialization> | undefined>(
     undefined,
   );
   const activeSession = sessions.find(({ id }) => id === activeSessionId);
+  const activeRuntime = projectId
+    ? runtimeState.sessions[sessionKey(projectId, activeSessionId)]
+    : undefined;
+  const sessionStatus = activeRuntime?.status ?? status;
+  const sessionError = activeRuntime?.error ?? error;
+
+  function setRuntimeDraft(value: string) {
+    setDraft(value);
+    if (projectId) {
+      dispatchRuntime({
+        type: "set-draft",
+        projectId,
+        sessionId: activeSessionId,
+        draft: value,
+      });
+    }
+  }
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
 
-  const handleEvent = useCallback((event: RpcRecord) => {
-    if (event.type === "bridge_error")
-      return fail(setError, setStatus, event.message);
-    if (event.type === "agent_start") {
-      agentRunObserved.current = true;
-      setStatus("streaming");
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    for (const session of sessions) {
+      dispatchRuntime({
+        type: "ensure-session",
+        projectId,
+        session: {
+          id: session.id,
+          title: session.title,
+          sessionPath: session.sessionPath,
+        },
+      });
     }
-    if (
-      event.type === "turn_start" ||
-      event.type === "message_start" ||
-      event.type === "compaction_start" ||
-      event.type === "auto_retry_start"
-    )
-      setStatus("streaming");
-    const notification = event.message;
-    if (
-      event.type === "extension_ui_request" &&
-      event.method === "notify" &&
-      typeof notification === "string"
-    ) {
-      updateSession(activeSessionIdRef.current, setSessions, (session) => ({
-        ...session,
-        history: [
-          ...session.history,
-          { kind: "message", role: "assistant", text: notification },
-        ],
-      }));
-      return;
-    }
-    if (event.type === "message_update") {
-      setStatus("streaming");
-      const update = asRecord(event.assistantMessageEvent);
-      if (update?.type === "text_delta" && typeof update.delta === "string") {
-        updateSession(activeSessionIdRef.current, setSessions, (session) => ({
-          ...session,
-          history: appendAssistantText(session.history, update.delta as string),
-        }));
+  }, [projectId, sessions]);
+
+  const handleEvent = useCallback(
+    ({
+      projectId: eventProjectId,
+      sessionId,
+      event,
+      ...identity
+    }: RuntimeEvent) => {
+      const selected = sessionKey(
+        projectIdRef.current ?? "",
+        activeSessionIdRef.current,
+      );
+      dispatchRuntime({
+        type: "runtime-event",
+        active: selected,
+        event: { projectId: eventProjectId, sessionId, event, ...identity },
+      });
+      // The normalized store retains every target. The presentation list is
+      // updated only for its own project while persisted history is loading.
+      if (eventProjectId !== projectIdRef.current) return;
+      if (event.type === "bridge_error") {
+        if (sessionId === activeSessionIdRef.current)
+          setError(
+            typeof event.message === "string"
+              ? event.message
+              : "Pi bridge failed",
+          );
+        return;
       }
-      return;
-    }
-    if (
-      event.type === "tool_execution_start" &&
-      typeof event.toolCallId === "string" &&
-      typeof event.toolName === "string"
-    ) {
-      setStatus("streaming");
-      updateSession(activeSessionIdRef.current, setSessions, (session) => ({
-        ...session,
-        history: [
-          ...session.history,
-          {
-            kind: "tool",
-            id: event.toolCallId as string,
-            name: event.toolName as string,
-            target: toolTarget(event.toolName, event.args),
-            output: "",
-            isError: false,
-            isRunning: true,
-          },
-        ],
-      }));
-      return;
-    }
-    if (
-      event.type === "tool_execution_update" ||
-      event.type === "tool_execution_end"
-    ) {
-      updateTool(event, activeSessionIdRef.current, setSessions);
-      return;
-    }
-    if (event.type === "agent_settled") setStatus("idle");
-  }, []);
+      if (event.type === "agent_start") agentRunObserved.current = true;
+      if (
+        (event.type === "agent_settled" || event.type === "bridge_error") &&
+        eventProjectId === projectIdRef.current
+      ) {
+        startedRuntimes.current.delete(sessionKey(eventProjectId, sessionId));
+      }
+      const notification = event.message;
+      if (
+        event.type === "extension_ui_request" &&
+        event.method === "notify" &&
+        typeof notification === "string"
+      ) {
+        updateSession(sessionId, setSessions, (session) => ({
+          ...session,
+          history: [
+            ...session.history,
+            { kind: "message", role: "assistant", text: notification },
+          ],
+        }));
+        return;
+      }
+      if (event.type === "message_update") {
+        const update = asRecord(event.assistantMessageEvent);
+        if (update?.type === "text_delta" && typeof update.delta === "string")
+          updateSession(sessionId, setSessions, (session) => ({
+            ...session,
+            history: appendAssistantText(
+              session.history,
+              update.delta as string,
+            ),
+          }));
+        return;
+      }
+      if (
+        event.type === "tool_execution_start" &&
+        typeof event.toolCallId === "string" &&
+        typeof event.toolName === "string"
+      ) {
+        updateSession(sessionId, setSessions, (session) => ({
+          ...session,
+          history: [
+            ...session.history,
+            {
+              kind: "tool",
+              id: event.toolCallId as string,
+              name: event.toolName as string,
+              target: toolTarget(event.toolName, event.args),
+              output: "",
+              isError: false,
+              isRunning: true,
+            },
+          ],
+        }));
+        return;
+      }
+      if (
+        event.type === "tool_execution_update" ||
+        event.type === "tool_execution_end"
+      )
+        updateTool(event, sessionId, setSessions);
+    },
+    [],
+  );
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -167,13 +268,17 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       try {
         unlisten = await client.listen(handleEvent);
         if (!active) return unlisten();
-        startup.current ??= initializeAgent(client);
+        startup.current ??= initializeWorkspace(client);
         const workspace = await startup.current;
         if (active) {
           setDirectory(workspace.directory);
+          setProjects(uniqueProjects(await client.listProjects()));
+          projectIdRef.current = workspace.projectId;
+          setProjectId(workspace.projectId);
           setSessions(workspace.sessions);
-          activeSessionIdRef.current = workspace.activeSession.id;
-          setActiveSessionId(workspace.activeSession.id);
+          activeSessionIdRef.current =
+            workspace.activeSession?.id ?? INITIAL_SESSION_ID;
+          setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
           setStatus("ready");
         }
       } catch (reason) {
@@ -186,6 +291,72 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     };
   }, [client, handleEvent]);
 
+  async function selectProject(nextProject: Project) {
+    if (nextProject.id === projectId) return;
+    try {
+      await client.selectProject(nextProject.id);
+      setStatus("starting");
+      setError(undefined);
+      setDraft("");
+      resetCommandDiscovery();
+      const workspace = await initializeWorkspace(client);
+      setDirectory(workspace.directory);
+      projectIdRef.current = workspace.projectId;
+      setProjectId(workspace.projectId);
+      setSessions(workspace.sessions);
+      activeSessionIdRef.current =
+        workspace.activeSession?.id ?? INITIAL_SESSION_ID;
+      setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
+      setProjects(uniqueProjects(await client.listProjects()));
+      setStatus("ready");
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
+
+  async function saveProjectRename(project: Project, value: string) {
+    const displayName = value.trim();
+    if (!displayName || displayName === project.displayName) return;
+    try {
+      await client.renameProject(project.id, displayName);
+      setProjects((current) =>
+        current.map((item) =>
+          item.id === project.id ? { ...item, displayName } : item,
+        ),
+      );
+      setDialog(undefined);
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
+
+  async function showRemoveProject(project: Project) {
+    try {
+      const snapshot = await client.projectRuntimeSnapshot(project.id);
+      setDialog({ kind: "remove-project", project, snapshot });
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
+
+  async function removeCurrentProject(
+    project: Project,
+    snapshot: ProjectRuntimeSnapshot,
+  ) {
+    try {
+      await client.removeProject(project.id, snapshot);
+      setProjects((current) =>
+        current.filter((item) => item.id !== project.id),
+      );
+      setDialog(undefined);
+      setProjectId(undefined);
+      setSessions([]);
+      setDirectory("");
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
+
   async function changeWorkspace() {
     if (status === "streaming" || status === "starting") return;
     try {
@@ -195,11 +366,15 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       setError(undefined);
       setDraft("");
       resetCommandDiscovery();
-      const workspace = await initializeAgent(client);
+      const workspace = await initializeWorkspace(client);
       setDirectory(workspace.directory);
+      projectIdRef.current = workspace.projectId;
+      setProjectId(workspace.projectId);
       setSessions(workspace.sessions);
-      activeSessionIdRef.current = workspace.activeSession.id;
-      setActiveSessionId(workspace.activeSession.id);
+      activeSessionIdRef.current =
+        workspace.activeSession?.id ?? INITIAL_SESSION_ID;
+      setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
+      setProjects(uniqueProjects(await client.listProjects()));
       setStatus("ready");
     } catch (reason) {
       fail(setError, setStatus, reason);
@@ -207,16 +382,31 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   }
 
   async function createSession() {
-    if (!isInteractive(status)) return;
+    if (!isSessionInteractive(activeRuntime)) return;
     const id = `session-${sessionSequence.current++}`;
     try {
       assertResponse(
-        await client.sendRpc({ id, type: "new_session" }),
+        await client.sendRpc(activeTarget(projectId, activeSessionId), {
+          id,
+          type: "new_session",
+        }),
         "new session",
       );
-      const metadata = await getSessionMetadata(client, `${id}-state`);
+      const priorTarget = activeTarget(projectId, activeSessionId);
+      const metadata = await getSessionMetadata(
+        client,
+        priorTarget,
+        `${id}-state`,
+      );
+      const stableTarget = await client.bindSession(priorTarget, metadata.id);
+      startedRuntimes.current.delete(
+        sessionKey(priorTarget.projectId, priorTarget.sessionId),
+      );
+      startedRuntimes.current.add(
+        sessionKey(stableTarget.projectId, stableTarget.sessionId),
+      );
       assertResponse(
-        await client.sendRpc({
+        await client.sendRpc(stableTarget, {
           id: `name-${id}`,
           type: "set_session_name",
           name: metadata.id,
@@ -238,22 +428,35 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   }
 
   async function selectSession(session: WorkspaceSession) {
-    if (session.id === activeSessionId || status === "streaming") return;
+    if (session.id === activeSessionId) return;
     const previousSessionId = activeSessionId;
     try {
+      if (!projectId)
+        throw new Error("Select a project before selecting sessions");
       activeSessionIdRef.current = session.id;
+      dispatchRuntime({
+        type: "select-session",
+        projectId,
+        sessionId: session.id,
+      });
+      setDraft(
+        runtimeState.sessions[sessionKey(projectId, session.id)]?.draft ?? "",
+      );
+      setActiveSessionId(session.id);
+      if (session.historyLoaded) return;
       updateSession(session.id, setSessions, (current) => ({
         ...current,
-        historyLoading: !current.historyLoaded,
+        historyLoading: true,
       }));
-      setActiveSessionId(session.id);
-      setDraft("");
-      const restored = await switchAndLoad(
-        client,
-        session,
-        `switch-${requestSequence.current++}`,
-      );
-      updateSession(session.id, setSessions, () => restored);
+      const history = await getHistory(client, projectId, session.sessionPath);
+      updateSession(session.id, setSessions, (current) => ({
+        ...current,
+        historyLoaded: true,
+        historyLoading: false,
+        ...history,
+        // Events can arrive before persisted history is loaded; preserve them.
+        history: [...history.history, ...current.history],
+      }));
     } catch (reason) {
       activeSessionIdRef.current = previousSessionId;
       setActiveSessionId(previousSessionId);
@@ -277,7 +480,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       historyLoading: true,
     }));
     try {
+      if (!projectId)
+        throw new Error("Select a project before loading history");
       const page = await client.sessionHistory(
+        projectId,
         session.sessionPath,
         session.historyBefore,
         HISTORY_PAGE_SIZE,
@@ -311,18 +517,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     const title = value.trim();
     if (!title || title === session.title) return;
     try {
-      if (session.id !== activeSessionId) {
-        const restored = await switchAndLoad(
-          client,
-          session,
-          `switch-${requestSequence.current++}`,
-        );
-        updateSession(session.id, setSessions, () => restored);
-        activeSessionIdRef.current = session.id;
-        setActiveSessionId(session.id);
-      }
+      if (!projectId)
+        throw new Error("Select a project before renaming a session");
       assertResponse(
-        await client.sendRpc({
+        await client.sendRpc(activeTarget(projectId, session.id), {
           id: `rename-session-${requestSequence.current++}`,
           type: "set_session_name",
           name: title,
@@ -341,7 +539,8 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
 
   async function sendPrompt() {
     const message = draft.trim();
-    if (!message || !activeSession || !isInteractive(status)) return;
+    if (!message || !activeSession || !isSessionInteractive(activeRuntime))
+      return;
     updateSession(activeSession.id, setSessions, (session) => ({
       ...session,
       history: [
@@ -353,27 +552,70 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       ? (await loadCommands(),
         isExtensionCommand(message, discoveredCommands.current))
       : false;
-    setDraft("");
+    setRuntimeDraft("");
     agentRunObserved.current = false;
-    setStatus("streaming");
+    if (projectId) {
+      dispatchRuntime({
+        type: "set-status",
+        projectId,
+        sessionId: activeSession.id,
+        status: "streaming",
+      });
+    }
     try {
+      const target = activeTarget(projectId, activeSession.id);
+      await ensureRuntimeStarted(target, activeSession.sessionPath);
       assertResponse(
-        await client.sendRpc({
+        await client.sendRpc(target, {
           id: `prompt-${requestSequence.current++}`,
           type: "prompt",
           message,
         }),
         "send prompt",
       );
-      if (extensionCommand && !agentRunObserved.current) setStatus("idle");
+      if (extensionCommand && !agentRunObserved.current && projectId) {
+        dispatchRuntime({
+          type: "set-status",
+          projectId,
+          sessionId: activeSession.id,
+          status: "idle",
+        });
+      }
     } catch (reason) {
-      fail(setError, setStatus, reason);
+      const record = asRecord(reason);
+      const message =
+        reason instanceof Error
+          ? reason.message
+          : typeof record?.message === "string"
+            ? record.message
+            : String(reason);
+      if (projectId) {
+        dispatchRuntime({
+          type: "set-status",
+          projectId,
+          sessionId: activeSession.id,
+          status: "failed",
+          error: message,
+        });
+      }
+      setError(message);
     }
   }
 
   async function abort() {
+    if (projectId) {
+      dispatchRuntime({
+        type: "set-status",
+        projectId,
+        sessionId: activeSessionId,
+        status: "aborted",
+      });
+    }
     try {
-      assertResponse(await client.abortAgent(), "abort");
+      assertResponse(
+        await client.abortAgent(activeTarget(projectId, activeSessionId)),
+        "abort",
+      );
     } catch (reason) {
       fail(setError, setStatus, reason);
     }
@@ -388,10 +630,29 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     setShowCommands(false);
   }
 
+  async function ensureRuntimeStarted(
+    target: import("./pi-client").RuntimeTarget,
+    sessionPath: string,
+  ) {
+    const targetKey = sessionKey(target.projectId, target.sessionId);
+    if (startedRuntimes.current.has(targetKey)) return;
+    await client.startAgent(target, sessionPath);
+    startedRuntimes.current.add(targetKey);
+  }
+
   function loadCommands(): Promise<void> {
     if (commandDiscovery.current) return commandDiscovery.current;
     const generation = commandGeneration.current;
-    commandDiscovery.current = getCommands(client, "get-commands-0")
+    if (!projectId || !activeSession)
+      return Promise.reject(
+        new Error("Select a project and session before loading commands"),
+      );
+    const target = activeTarget(projectId, activeSessionId);
+    commandDiscovery.current = ensureRuntimeStarted(
+      target,
+      activeSession.sessionPath,
+    )
+      .then(() => getCommands(client, target, "get-commands-0"))
       .then((availableCommands) => {
         if (generation !== commandGeneration.current) return;
         discoveredCommands.current = availableCommands;
@@ -407,7 +668,8 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
 
   const matchingCommands = showCommands ? matchCommands(commands, draft) : [];
   function selectCommand(command: PiCommand) {
-    setDraft(`/${command.name} `);
+    const value = `/${command.name} `;
+    setRuntimeDraft(value);
     setCommandIndex(0);
     setShowCommands(false);
   }
@@ -422,56 +684,139 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           <span>PI APP</span>
         </div>
         <nav aria-label="Workspace navigation" className="workspace-navigation">
-          <div className="workspace-directory">
-            <p className="current-directory" title={directory}>
-              {directory || "No workspace selected"}
-            </p>
-            <button
-              className="change-workspace"
-              disabled={status === "streaming" || status === "starting"}
-              onClick={() => void changeWorkspace()}
-              type="button"
-            >
-              Change workspace
-            </button>
-          </div>
           <button
             className="new-session"
-            disabled={!isInteractive(status)}
+            disabled={!isSessionInteractive(activeRuntime)}
             onClick={() => void createSession()}
             type="button"
           >
             <span aria-hidden="true">+</span> New chat
           </button>
           <section
+            className="project-navigation"
+            aria-labelledby="projects-heading"
+          >
+            <div className="project-heading">
+              <h2 id="projects-heading">Projects</h2>
+              <p className="current-directory" title={directory}>
+                {directory || "No workspace selected"}
+              </p>
+              <button
+                className="change-workspace"
+                disabled={status === "starting"}
+                onClick={() => void changeWorkspace()}
+                type="button"
+              >
+                Change workspace
+              </button>
+            </div>
+            <div className="project-list">
+              {projects.map((project) => (
+                <button
+                  aria-current={project.id === projectId ? "page" : undefined}
+                  aria-label={`${project.displayName}${project.id === projectId ? " Current project" : ""}`}
+                  className="project-select"
+                  key={project.id}
+                  onClick={() => void selectProject(project)}
+                  type="button"
+                >
+                  <strong>{project.displayName}</strong>
+                  {(() => {
+                    const summary = projectRuntimeSummary(
+                      runtimeState,
+                      project.id,
+                    );
+                    return (
+                      (summary.running || summary.unread) && (
+                        <span
+                          aria-label={`Project status: ${summary.running ? "running" : "unread"}`}
+                        >
+                          {summary.running ? " Running" : " Unread"}
+                        </span>
+                      )
+                    );
+                  })()}
+                </button>
+              ))}
+              {!projects.length && (
+                <p className="empty-projects">Add a project to begin.</p>
+              )}
+            </div>
+            {currentProject && (
+              <div className="project-actions">
+                <button
+                  aria-label="Rename current project"
+                  onClick={() =>
+                    setDialog({
+                      kind: "rename-project",
+                      project: currentProject,
+                    })
+                  }
+                  type="button"
+                >
+                  Rename
+                </button>
+                <button
+                  aria-label="Remove current project"
+                  onClick={() => void showRemoveProject(currentProject)}
+                  type="button"
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+          </section>
+          <section
             className="navigation-section recents"
             aria-labelledby="recents-heading"
           >
             <h2 id="recents-heading">Recents</h2>
             <div className="session-list">
+              {!sessions.length && (
+                <p className="empty-projects">No sessions in this project.</p>
+              )}
               {sessions.map((session) => (
                 <div className="session-item" key={session.id}>
                   <button
                     aria-current={
                       session.id === activeSessionId ? "page" : undefined
                     }
+                    aria-describedby={`session-status-${session.id}`}
                     className="session-select"
                     onClick={() => void selectSession(session)}
                     type="button"
                   >
                     <span className="session-copy">
                       <strong>{session.title}</strong>
+                      {runtimeState.sessions[
+                        sessionKey(projectId ?? "", session.id)
+                      ]?.unread && (
+                        <span
+                          aria-label="Unread updates"
+                          className="session-unread"
+                        />
+                      )}
                       <small>
                         {lastMessageText(session.history) ||
                           "Empty conversation"}
                       </small>
+                      <small aria-hidden="true" className="session-status" />
                     </span>
                   </button>
+                  <span
+                    className="visually-hidden"
+                    id={`session-status-${session.id}`}
+                  >
+                    Session status:{" "}
+                    {runtimeState.sessions[
+                      sessionKey(projectId ?? "", session.id)
+                    ]?.status ?? "idle"}
+                  </span>
                   <div className="session-actions">
                     <button
                       aria-label={`Rename session ${session.title}`}
                       className="rename-session"
-                      disabled={status === "streaming"}
+                      disabled={sessionStatus === "streaming"}
                       onClick={() => setDialog({ kind: "rename", session })}
                       type="button"
                     >
@@ -518,7 +863,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             {hideToolCalls ? "Show tool calls" : "Hide tool calls"}
           </button>
         </header>
-        {error && <p role="alert">{error}</p>}
+        {sessionError && <p role="alert">{sessionError}</p>}
         <Conversation
           hasMoreHistory={activeSession?.hasMoreHistory ?? false}
           history={activeSession?.history ?? []}
@@ -526,7 +871,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           hideToolCalls={hideToolCalls}
           key={activeSessionId}
           onLoadOlder={loadOlderHistory}
-          status={status}
+          status={sessionStatus}
         />
         <form
           className="composer"
@@ -547,16 +892,25 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             }
             aria-controls="slash-commands"
             aria-expanded={matchingCommands.length > 0}
-            disabled={!isInteractive(status)}
+            disabled={!isSessionInteractive(activeRuntime)}
             id="prompt"
             onChange={(event) => {
               const value = event.target.value;
-              setDraft(value);
+              setRuntimeDraft(value);
               setCommandIndex(0);
               setShowCommands(value.startsWith("/"));
               if (value.startsWith("/")) void loadCommands();
             }}
             onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !matchingCommands.length
+              ) {
+                event.preventDefault();
+                void sendPrompt();
+                return;
+              }
               if (!matchingCommands.length) return;
               if (event.key === "ArrowDown") {
                 event.preventDefault();
@@ -607,7 +961,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             </ul>
           )}
           <div className="composer-footer">
-            {status === "streaming" ? (
+            {sessionStatus === "streaming" ? (
               <button
                 aria-label="Stop generating"
                 className="composer-action composer-stop"
@@ -622,7 +976,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
               <button
                 aria-label="Send message"
                 className="composer-action composer-send"
-                disabled={!isInteractive(status) || !draft.trim()}
+                disabled={!isSessionInteractive(activeRuntime) || !draft.trim()}
                 type="submit"
               >
                 <svg aria-hidden="true" viewBox="0 0 16 16">
@@ -633,6 +987,61 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           </div>
         </form>
       </section>
+      {dialog?.kind === "rename-project" && (
+        <form
+          aria-label="Rename project"
+          className="session-dialog"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            void saveProjectRename(
+              dialog.project,
+              String(form.get("project-name")),
+            );
+          }}
+        >
+          <label>
+            Project name
+            <input
+              defaultValue={dialog.project.displayName}
+              name="project-name"
+            />
+          </label>
+          <button type="submit">Save project name</button>
+          <button onClick={() => setDialog(undefined)} type="button">
+            Cancel
+          </button>
+        </form>
+      )}
+      {dialog?.kind === "remove-project" && (
+        <section aria-label="Remove project" className="session-dialog">
+          <p>
+            This removes only the project record; files and Pi session history
+            stay on disk.
+          </p>
+          {dialog.snapshot.targets.length > 0 && (
+            <>
+              <p>These running Pi tasks will be terminated:</p>
+              <ul>
+                {dialog.snapshot.targets.map((target) => (
+                  <li key={target.sessionId}>{target.sessionId}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          <button
+            onClick={() =>
+              void removeCurrentProject(dialog.project, dialog.snapshot)
+            }
+            type="button"
+          >
+            Remove project
+          </button>
+          <button onClick={() => setDialog(undefined)} type="button">
+            Cancel
+          </button>
+        </section>
+      )}
       {dialog?.kind === "rename" && (
         <form
           aria-label="Rename session"
@@ -659,8 +1068,12 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   );
 }
 
-async function getCommands(client: PiClient, id: string): Promise<PiCommand[]> {
-  const response = await client.sendRpc({ id, type: "get_commands" });
+async function getCommands(
+  client: PiClient,
+  target: import("./pi-client").RuntimeTarget,
+  id: string,
+): Promise<PiCommand[]> {
+  const response = await client.sendRpc(target, { id, type: "get_commands" });
   assertResponse(response, "get commands");
   const data = asRecord(response.data);
   const commands = data?.commands;
@@ -818,46 +1231,48 @@ function historyEntryKey(entry: HistoryEntry, index: number): string {
     : `tool-${entry.id}-${index}`;
 }
 
-async function initializeAgent(
+async function initializeWorkspace(
   client: PiClient,
 ): Promise<WorkspaceInitialization> {
   if (!(await client.currentDirectory()) && !(await client.chooseWorkspace())) {
-    throw new Error("Select a workspace to start Pi.");
+    throw new Error("Select a workspace to view its sessions.");
   }
-  await client.startAgent();
   const directory = await client.currentDirectory();
-  if (!directory) throw new Error("Select a workspace before starting Pi");
-  const metadata = await getSessionMetadata(client, "session-initial-state");
-  const sessions = (await client.listSessions()).map(workspaceSession);
-  const matchingSession = sessions.find(
-    ({ sessionPath }) => sessionPath === metadata.path,
+  if (!directory) throw new Error("Select a workspace before viewing sessions");
+  const project = (await client.listProjects()).find(
+    (candidate) => candidate.path === directory,
   );
-  if (!matchingSession) {
-    const activeSession = loadedWorkspaceSession({
-      id: metadata.id,
-      title: metadata.name || metadata.id,
-      path: metadata.path,
-    });
-    return {
-      activeSession,
-      directory,
-      sessions: [...sessions, activeSession],
-    };
-  }
-  const activeSession = {
-    ...matchingSession,
-    title: metadata.name || matchingSession.title,
+  if (!project)
+    throw new Error("Selected workspace is missing its project identity");
+  const sessions = (await client.listSessions(project.id)).map(
+    workspaceSession,
+  );
+  const activeSession =
+    sessions.find((session) => session.id === "terminal-id") ?? sessions[0];
+  if (!activeSession) return { directory, projectId: project.id, sessions };
+  const loaded = {
+    ...activeSession,
     historyLoaded: true,
     historyLoading: false,
-    ...(await getHistory(client, metadata.path)),
+    ...(await getHistory(client, project.id, activeSession.sessionPath)),
   };
   return {
-    activeSession,
+    activeSession: loaded,
     directory,
+    projectId: project.id,
     sessions: sessions.map((session) =>
-      session.id === activeSession.id ? activeSession : session,
+      session.id === loaded.id ? loaded : session,
     ),
   };
+}
+
+function uniqueProjects(projects: Project[]): Project[] {
+  const seen = new Set<string>();
+  return projects.filter((project) => {
+    if (seen.has(project.id)) return false;
+    seen.add(project.id);
+    return true;
+  });
 }
 
 function workspaceSession(session: PersistedSession): WorkspaceSession {
@@ -884,38 +1299,12 @@ function emptyWorkspaceSession(session: PersistedSession): WorkspaceSession {
     history: [],
   };
 }
-async function switchAndLoad(
-  client: PiClient,
-  session: WorkspaceSession,
-  id: string,
-): Promise<WorkspaceSession> {
-  const switched = client.sendRpc({
-    id,
-    type: "switch_session",
-    sessionPath: session.sessionPath,
-  });
-  if (session.historyLoaded) {
-    assertResponse(await switched, "switch session");
-    return session;
-  }
-  const [response, history] = await Promise.all([
-    switched,
-    getHistory(client, session.sessionPath),
-  ]);
-  assertResponse(response, "switch session");
-  return {
-    ...session,
-    historyLoaded: true,
-    historyLoading: false,
-    ...history,
-  };
-}
-
 async function getSessionMetadata(
   client: PiClient,
+  target: import("./pi-client").RuntimeTarget,
   id: string,
 ): Promise<{ id: string; path: string; name?: string }> {
-  const response = await client.sendRpc({ id, type: "get_state" });
+  const response = await client.sendRpc(target, { id, type: "get_state" });
   assertResponse(response, "get session state");
   const data = asRecord(response.data);
   if (typeof data?.sessionFile !== "string")
@@ -931,6 +1320,7 @@ async function getSessionMetadata(
 
 async function getHistory(
   client: PiClient,
+  projectId: string,
   sessionPath: string,
 ): Promise<
   Pick<
@@ -939,6 +1329,7 @@ async function getHistory(
   >
 > {
   const page = await client.sessionHistory(
+    projectId,
     sessionPath,
     Number.MAX_SAFE_INTEGER,
     HISTORY_PAGE_SIZE,

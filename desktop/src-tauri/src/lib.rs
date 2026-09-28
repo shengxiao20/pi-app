@@ -1,5 +1,9 @@
+use tauri::Manager;
+
 pub mod commands;
+pub mod projects;
 pub mod rpc;
+pub mod runtime;
 pub mod workspace;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -11,15 +15,37 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::start_agent,
+            commands::bind_session,
             commands::send_rpc,
             commands::abort_agent,
             commands::current_directory,
+            commands::list_projects,
+            commands::add_project,
+            commands::select_project,
+            commands::rename_project,
+            commands::remove_project,
             commands::choose_workspace,
             commands::list_sessions,
             commands::session_history,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Pi App desktop client");
+        .build(tauri::generate_context!())
+        .expect("error while building Pi App desktop client")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let state = app.state::<commands::AppState>();
+                let errors = tauri::async_runtime::block_on(state.shutdown_all());
+                if !errors.is_empty() {
+                    eprintln!(
+                        "Pi App could not stop every session runtime during shutdown: {}",
+                        errors
+                            .into_iter()
+                            .map(|error| error.to_string())
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    );
+                }
+            }
+        });
 }
 
 #[cfg(test)]

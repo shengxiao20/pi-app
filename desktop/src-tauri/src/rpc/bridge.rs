@@ -217,7 +217,10 @@ mod tests {
     async fn bridges_fake_pi_responses_events_and_abort() {
         let bridge = AgentBridge::new(
             "sh",
-            [OsString::from("-c"), OsString::from(fake_pi_script())],
+            [
+                OsString::from("-c"),
+                OsString::from(fake_pi_script("Hello")),
+            ],
         );
         let mut events = bridge.subscribe_events();
         bridge.start_agent(Path::new(".")).await.unwrap();
@@ -240,6 +243,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn two_fake_pi_processes_keep_prompts_events_and_abort_independent() {
+        let first = AgentBridge::new(
+            "sh",
+            [OsString::from("-c"), OsString::from(fake_pi_script("A"))],
+        );
+        let second = AgentBridge::new(
+            "sh",
+            [OsString::from("-c"), OsString::from(fake_pi_script("B"))],
+        );
+        let mut first_events = first.subscribe_events();
+        let mut second_events = second.subscribe_events();
+        first.start_agent(Path::new(".")).await.unwrap();
+        second.start_agent(Path::new(".")).await.unwrap();
+
+        assert!(second
+            .send_rpc(json!({ "id": "b-1", "type": "prompt", "message": "B" }))
+            .await
+            .unwrap()["success"]
+            .as_bool()
+            .unwrap());
+        assert_eq!(
+            second_events.recv().await.unwrap(),
+            json!({ "type": "message_update", "delta": "B from fake Pi" })
+        );
+        assert!(first
+            .send_rpc(json!({ "id": "a-1", "type": "prompt", "message": "A" }))
+            .await
+            .unwrap()["success"]
+            .as_bool()
+            .unwrap());
+        assert_eq!(
+            first_events.recv().await.unwrap(),
+            json!({ "type": "message_update", "delta": "A from fake Pi" })
+        );
+
+        first.stop_agent().await.unwrap();
+        assert!(second.abort_agent().await.unwrap()["success"]
+            .as_bool()
+            .unwrap());
+        assert!(second
+            .send_rpc(json!({ "id": "b-2", "type": "prompt", "message": "still running" }))
+            .await
+            .unwrap()["success"]
+            .as_bool()
+            .unwrap());
+        assert_eq!(
+            second_events.recv().await.unwrap(),
+            json!({ "type": "message_update", "delta": "B from fake Pi" })
+        );
+        second.stop_agent().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn rejects_rpc_before_an_agent_starts() {
         let bridge = AgentBridge::new("sh", std::iter::empty());
 
@@ -252,14 +308,16 @@ mod tests {
         );
     }
 
-    fn fake_pi_script() -> &'static str {
-        r#"while IFS= read -r line; do
+    fn fake_pi_script(label: &str) -> String {
+        format!(
+            r#"while IFS= read -r line; do
 id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 type=$(printf '%s' "$line" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
 if [ "$type" = "prompt" ]; then
-  printf '%s\n' '{"type":"message_update","delta":"Hello from fake Pi"}'
+  printf '%s\n' '{{"type":"message_update","delta":"{label} from fake Pi"}}'
 fi
-printf '{"id":"%s","type":"response","command":"%s","success":true}\n' "$id" "$type"
+printf '{{"id":"%s","type":"response","command":"%s","success":true}}\n' "$id" "$type"
 done"#
+        )
     }
 }
