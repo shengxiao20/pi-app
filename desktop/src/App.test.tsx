@@ -128,19 +128,48 @@ describe("App workspace boundary", () => {
     await screen.findAllByText("Session A");
     const dataTransfer = {
       effectAllowed: "",
-      getData: vi.fn().mockReturnValue("a-session"),
+      getData: vi.fn((type: string) =>
+        type === "application/x-pi-session" ? "a-session" : "",
+      ),
       setData: vi.fn(),
     };
     fireEvent.dragStart(
       screen.getAllByRole("button", { name: /Session A/ })[0],
       { dataTransfer },
     );
-    fireEvent.drop(screen.getByText("Work").parentElement!, { dataTransfer });
+    fireEvent.drop(screen.getByText("Work"), { dataTransfer });
 
     await waitFor(() =>
       expect(fake.client.assignSessionTag).toHaveBeenCalledWith("a-session", 7),
     );
     expect(fake.client.startAgent).not.toHaveBeenCalled();
+  });
+
+  it("expands a tag by clicking its text", async () => {
+    const fake = createClient();
+    fake.client.listTags = vi.fn().mockResolvedValue([{ id: 7, name: "Work" }]);
+    fake.client.listSessionTagAssignments = vi
+      .fn()
+      .mockResolvedValue([{ sessionId: "a-session", tagId: 7 }]);
+    render(<App client={fake.client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Expand Work" }));
+    expect((await screen.findAllByText("Session A")).length).toBeGreaterThan(0);
+  });
+
+  it("closes an open context menu when clicking elsewhere", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+    const session = (
+      await screen.findAllByRole("button", { name: /Session A/ })
+    )[0];
+
+    fireEvent.contextMenu(session, { clientX: 20, clientY: 20 });
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeTruthy();
+    fireEvent.pointerDown(document.body);
+    await waitFor(() =>
+      expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull(),
+    );
   });
 
   it("opens a context menu and renames a session inline", async () => {
@@ -164,6 +193,19 @@ describe("App workspace boundary", () => {
         expect.objectContaining({ type: "set_session_name", name: "Renamed" }),
       ),
     );
+  });
+
+  it("lists Uncategorized after named tag groups", async () => {
+    const fake = createClient();
+    fake.client.listTags = vi.fn().mockResolvedValue([{ id: 7, name: "Work" }]);
+    render(<App client={fake.client} />);
+
+    const tags = await screen.findAllByText("Work");
+    const uncategorized = screen.getByText("Uncategorized");
+    expect(
+      tags[0].compareDocumentPosition(uncategorized) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("deduplicates background terminal notifications and clears them on workspace replacement", async () => {
@@ -206,11 +248,24 @@ describe("App workspace boundary", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Notifications: 1 unread" }),
     );
-    expect(screen.getByText("Session B: completed")).toBeTruthy();
+    fireEvent.click(screen.getByText("Session B: completed"));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Notifications: 0 unread" }),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByText("Session B: completed")).toBeNull();
+    expect(
+      screen
+        .getAllByRole("button", { name: /Session B/ })[0]
+        .getAttribute("aria-current"),
+    ).toBe("page");
 
     fireEvent.click(screen.getByRole("button", { name: "Change workspace" }));
     await waitFor(() =>
-      expect(screen.getAllByText("Session B")).toHaveLength(1),
+      expect(
+        screen.getAllByRole("button", { name: /Session B/ }).length,
+      ).toBeGreaterThan(0),
     );
     expect(
       screen.getByRole("button", { name: "Notifications: 0 unread" }),

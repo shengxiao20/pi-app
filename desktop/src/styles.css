@@ -1110,6 +1110,18 @@ textarea::placeholder {
   min-width: 22px;
   padding: 3px;
 }
+
+.tag-toggle {
+  flex: 1;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  gap: 5px;
+  justify-content: flex-start;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
 .tag-toggle:hover,
 .create-tag:hover {
   background: #e0e6e9;

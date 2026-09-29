@@ -140,6 +140,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const sessionSequence = useRef(0);
   const loadingOlderSessions = useRef(new Set<string>());
   const startedRuntimes = useRef(new Set<string>());
+  const startingRuntimes = useRef(new Map<string, Promise<void>>());
   const startup = useRef<Promise<WorkspaceInitialization> | undefined>(
     undefined,
   );
@@ -173,6 +174,16 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  useEffect(() => {
+    if (!contextMenu && !notificationsOpen) return;
+    const closeOverlays = () => {
+      setContextMenu(undefined);
+      setNotificationsOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOverlays);
+    return () => window.removeEventListener("pointerdown", closeOverlays);
+  }, [contextMenu, notificationsOpen]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -389,7 +400,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   async function assignTag(sessionId: string, tagId: number | null) {
     try {
       await client.assignSessionTag(sessionId, tagId);
-      setAssignments(await client.listSessionTagAssignments());
+      setAssignments((current) => [
+        ...current.filter((assignment) => assignment.sessionId !== sessionId),
+        ...(tagId === null ? [] : [{ sessionId, tagId }]),
+      ]);
     } catch (reason) {
       fail(setError, setStatus, reason);
     }
@@ -507,6 +521,15 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         path: metadata.path,
       });
       setSessions((current) => [...current, session]);
+      dispatchRuntime({
+        type: "ensure-session",
+        projectId: stableTarget.projectId,
+        session: {
+          id: session.id,
+          title: session.title,
+          sessionPath: session.sessionPath,
+        },
+      });
       activeSessionIdRef.current = metadata.id;
       setActiveSessionId(metadata.id);
       setDraft("");
@@ -516,6 +539,9 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   }
 
   async function selectSession(session: WorkspaceSession) {
+    setNotifications((current) =>
+      current.filter((notification) => notification.sessionId !== session.id),
+    );
     if (session.id === activeSessionId) return;
     const previousSessionId = activeSessionId;
     try {
@@ -691,20 +717,29 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     setShowCommands(false);
   }
 
-  async function ensureRuntimeStarted(
+  function ensureRuntimeStarted(
     target: import("./pi-client").RuntimeTarget,
     sessionPath: string,
-  ) {
+  ): Promise<void> {
     const targetKey = sessionKey(target.projectId, target.sessionId);
-    if (startedRuntimes.current.has(targetKey)) return;
-    try {
-      await client.startAgent(target, sessionPath);
-    } catch (reason) {
-      // The desktop may reconnect after a UI reload while its session child is
-      // still alive. That child is the runtime this target needs, not an error.
-      if (!isAlreadyRunningError(reason)) throw reason;
-    }
-    startedRuntimes.current.add(targetKey);
+    if (startedRuntimes.current.has(targetKey)) return Promise.resolve();
+    const existing = startingRuntimes.current.get(targetKey);
+    if (existing) return existing;
+    const start = client
+      .startAgent(target, sessionPath)
+      .catch((reason) => {
+        // The desktop may reconnect after a UI reload while its session child is
+        // still alive. That child is the runtime this target needs, not an error.
+        if (!isAlreadyRunningError(reason)) throw reason;
+      })
+      .then(() => {
+        startedRuntimes.current.add(targetKey);
+      })
+      .finally(() => {
+        startingRuntimes.current.delete(targetKey);
+      });
+    startingRuntimes.current.set(targetKey, start);
+    return start;
   }
 
   function loadCommands(): Promise<void> {
@@ -754,7 +789,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
               aria-expanded={notificationsOpen}
               aria-label={`Notifications: ${notifications.filter((item) => !item.read).length} unread`}
               className="notification-toggle"
-              onClick={() => setNotificationsOpen((open) => !open)}
+              onClick={(event) => {
+                event.stopPropagation();
+                setNotificationsOpen((open) => !open);
+              }}
               type="button"
             >
               <NotificationIcon />
@@ -763,7 +801,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
               </span>
             </button>
             {notificationsOpen && (
-              <div role="list">
+              <div
+                onPointerDown={(event) => event.stopPropagation()}
+                role="list"
+              >
                 {notifications.map((item) => (
                   <button
                     key={item.key}
@@ -772,13 +813,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                         ({ id }) => id === item.sessionId,
                       );
                       if (session) void selectSession(session);
-                      setNotifications((current) =>
-                        current.map((entry) =>
-                          entry.key === item.key
-                            ? { ...entry, read: true }
-                            : entry,
-                        ),
-                      );
+                      setNotificationsOpen(false);
                     }}
                     role="listitem"
                     type="button"
@@ -889,28 +924,14 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                     onDrop={(event) => {
                       event.preventDefault();
                       const sessionId =
-                        event.dataTransfer.getData("text/plain");
+                        event.dataTransfer.getData(
+                          "application/x-pi-session",
+                        ) || draggedSessionId;
                       if (sessionId)
                         void assignTag(sessionId, group.tag?.id ?? null);
                       setDraggedSessionId(undefined);
                     }}
                   >
-                    <button
-                      aria-expanded={expandedTags.has(group.id)}
-                      aria-label={`${expandedTags.has(group.id) ? "Collapse" : "Expand"} ${group.name}`}
-                      className="tag-toggle"
-                      onClick={() =>
-                        setExpandedTags((current) => {
-                          const next = new Set(current);
-                          if (next.has(group.id)) next.delete(group.id);
-                          else next.add(group.id);
-                          return next;
-                        })
-                      }
-                      type="button"
-                    >
-                      {expandedTags.has(group.id) ? "−" : "+"}
-                    </button>
                     {renameTarget?.kind === "tag" &&
                     renameTarget.tag.id === group.tag?.id ? (
                       <input
@@ -927,7 +948,25 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                         value={renameValue}
                       />
                     ) : (
-                      <strong>{group.name}</strong>
+                      <button
+                        aria-expanded={expandedTags.has(group.id)}
+                        aria-label={`${expandedTags.has(group.id) ? "Collapse" : "Expand"} ${group.name}`}
+                        className="tag-toggle"
+                        onClick={() =>
+                          setExpandedTags((current) => {
+                            const next = new Set(current);
+                            if (next.has(group.id)) next.delete(group.id);
+                            else next.add(group.id);
+                            return next;
+                          })
+                        }
+                        type="button"
+                      >
+                        <span aria-hidden="true">
+                          {expandedTags.has(group.id) ? "⌄" : "›"}
+                        </span>
+                        {group.name}
+                      </button>
                     )}
                   </div>
                   {expandedTags.has(group.id) &&
@@ -938,6 +977,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                           onDragEnd={() => setDraggedSessionId(undefined)}
                           onDragStart={(event) => {
                             event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData(
+                              "application/x-pi-session",
+                              session.id,
+                            );
                             event.dataTransfer.setData(
                               "text/plain",
                               session.id,
@@ -1460,24 +1503,24 @@ function groupedSessions(
     assignments.map((item) => [item.sessionId, item.tagId]),
   );
   const groups = [
-    {
-      id: "uncategorized",
-      name: "Uncategorized",
-      sessions: [] as WorkspaceSession[],
-    },
     ...tags.map((tag) => ({
       id: String(tag.id),
       name: tag.name,
       tag,
       sessions: [] as WorkspaceSession[],
     })),
+    {
+      id: "uncategorized",
+      name: "Uncategorized",
+      sessions: [] as WorkspaceSession[],
+    },
   ];
   const byId = new Map(groups.map((group) => [group.id, group]));
   for (const session of sessions) {
     const group = byId.get(
       String(tagBySession.get(session.id) ?? "uncategorized"),
     );
-    (group ?? groups[0]).sessions.push(session);
+    (group ?? groups.at(-1)!).sessions.push(session);
   }
   return groups;
 }

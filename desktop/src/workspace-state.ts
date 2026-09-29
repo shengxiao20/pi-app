@@ -134,6 +134,7 @@ export function workspaceReducer(
       sessionKey(action.projectId, action.sessionId),
       (session) => ({
         ...session,
+        status: session.status === "completed" ? "idle" : session.status,
         unread: false,
       }),
     );

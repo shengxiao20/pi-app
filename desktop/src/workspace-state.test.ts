@@ -82,6 +82,32 @@ describe("workspaceReducer", () => {
     expect(state.sessions[two].unread).toBe(false);
   });
 
+  it("returns a completed session to idle when it is selected", () => {
+    const key = sessionKey("project", "session");
+    let state = createWorkspaceState();
+    state = workspaceReducer(state, {
+      type: "ensure-session",
+      projectId: "project",
+      session: { id: "session", title: "Session", sessionPath: "/session" },
+    });
+    state = workspaceReducer(state, {
+      type: "set-status",
+      projectId: "project",
+      sessionId: "session",
+      status: "completed",
+    });
+    state = workspaceReducer(state, {
+      type: "select-session",
+      projectId: "project",
+      sessionId: "session",
+    });
+
+    expect(state.sessions[key]).toMatchObject({
+      status: "idle",
+      unread: false,
+    });
+  });
+
   it("ignores an event from an older generation without affecting interactivity", () => {
     const key = sessionKey("project", "session");
     let state = createWorkspaceState();
