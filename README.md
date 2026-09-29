@@ -39,44 +39,6 @@ When a non-current session completes, fails, or is aborted, Pi App creates an in
 
 Each session owns its draft, runtime status, error, streamed output, tools, and unread state. Background output receives an accessible unread marker without stealing focus; selecting that session clears the marker while preserving its terminal status.
 
-### 会话消息为什么能在后台继续显示？（通俗版）
-
-这里的 **session stream** 可以把它理解成：Pi 正在一小段一小段地“写字”时，应用把每一小段及时送到**正确的那一个对话**里。它不是把一个对话的回答同时复制到所有对话。
-
-#### 1. 我们遇到了什么问题？
-
-想象奶奶同时让两位助手做事：一位在厨房写菜谱，另一位在客厅写购物清单。奶奶走到客厅查看清单时，厨房的助手还在继续写菜谱。
-
-以前，程序容易把“现在收到的新字”当成“屏幕上正在看的那一页”的新字。这样一来，厨房助手写的菜谱可能跑到客厅的购物清单上；或者为了避免弄错，奶奶只能等一个助手完全写完，才能去看另一个。这既不方便，也可能让内容串台。
-
-#### 2. 之前是怎么样的？
-
-之前桌面端更像只有一张总办公桌：多个会话共用一个 Pi 工作进程。切换会话时，应用会要求这个进程改去处理另一份会话记录；任务正在进行时，切换也会受到限制。
-
-同时，前端主要按“当前正在看的会话”接收实时消息。实时消息本身不总会写明它来自哪份会话，所以一旦用户在消息到达前切换页面，应用没有可靠办法判断该把它放在哪里。
-
-#### 3. 调研后选了什么方案？
-
-我们比较了几种做法：
-
-- **继续共用一个 Pi 进程，再不断切换会话**：同一项目里的两个会话不能真正同时工作，而且消息仍可能认错归属；不采用。
-- **只根据当前屏幕决定消息去向**：人一切换页面就可能放错内容；不采用。
-- **每个真正开始工作的会话配一位专属助手**：每位助手有自己的 Pi RPC 子进程，并在每条实时消息的信封上写清“项目 ID、会话 ID 和第几次启动”；采用。
-
-这里的“信封”是关键：后台收到 Pi 的消息后，先补上收件人信息，再交给界面。界面只按信封上的项目和会话投递，**不猜测**用户此刻正在看哪个页面。`generation`（第几次启动）还会挡住旧助手迟到的消息，避免它污染后来重新开始的同一会话。
-
-为了不白白占用资源，专属助手不是打开应用就全部启动：某个会话第一次需要发送任务时才启动；Pi 表示任务结束、发生桥接错误，或用户停止任务后，对应助手会被回收。会话历史仍由 Pi 保存，不会因为回收助手而删除。
-
-#### 4. 现在实现效果如何？
-
-- 可以在会话 A 正在生成回答时，切到会话 B 阅读、输入或发起另一项任务；切换不会停止或中断 A。
-- A 在后台继续产生的文字、工具执行状态和最终结果，仍会记到 A；回到 A 就能看到完整的已接收内容。
-- 后台会话有新内容时，侧边栏会出现未读提示，但不会强行把屏幕跳回 A；点开 A 后提示消失。
-- 每个会话各自保存草稿、运行状态、错误和工具记录。A 忙碌时，不会把 B 的输入框锁住；停止操作也只针对指定会话。
-- 如果一个旧运行实例晚到一条消息，应用会用启动代次识别并忽略它，避免旧内容混进新一轮对话。
-
-简单说：现在像是每份正在处理的工作都有写着名字的专属信封和专属助手。你可以先去看别的工作；回来时，原来的工作会在原处等着你，而不会跑错本子。
-
 Type `/` in the composer to discover the active Pi RPC workspace's extension commands, prompt templates, and Skills. Filter the accessible list, then use arrow keys and Enter or click a command to insert `/<name> `; submitting it uses Pi's existing `prompt` RPC execution. Built-in interactive TUI commands are intentionally excluded because Pi RPC does not expose them.
 
 During an active Pi run, the conversation shows a working indicator until Pi emits `agent_settled`. Tool entries show their live state and Pi-supplied target context: the path for `read`, `edit`, and `write`, or the command for `bash`. Pi App does not infer or fabricate a target when Pi did not provide one.
