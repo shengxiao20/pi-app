@@ -104,22 +104,66 @@ describe("App workspace boundary", () => {
     expect(fake.client.startAgent).not.toHaveBeenCalled();
   });
 
-  it("groups a session under its one assigned tag without starting a runtime", async () => {
+  it("creates a tag from the visible inline control", async () => {
     const fake = createClient();
-    fake.client.listTags = vi.fn().mockResolvedValue([{ id: 7, name: "Work" }]);
-    fake.client.listSessionTagAssignments = vi
-      .fn()
-      .mockResolvedValue([{ sessionId: "a-session", tagId: 7 }]);
+    fake.client.createTag = vi.fn().mockResolvedValue({ id: 7, name: "Work" });
     render(<App client={fake.client} />);
 
-    const expand = await screen.findByRole("button", { name: "Expand Work" });
-    fireEvent.click(expand);
-
-    const selector = await screen.findByRole("combobox", {
-      name: "Tag for Session A",
+    fireEvent.click(await screen.findByRole("button", { name: "Create tag" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New tag name" }), {
+      target: { value: "Work" },
     });
-    expect((selector as HTMLSelectElement).value).toBe("7");
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+
+    await waitFor(() =>
+      expect(fake.client.createTag).toHaveBeenCalledWith("Work"),
+    );
+  });
+
+  it("moves a session to a tag by dropping its session row onto the tag group", async () => {
+    const fake = createClient();
+    fake.client.listTags = vi.fn().mockResolvedValue([{ id: 7, name: "Work" }]);
+    render(<App client={fake.client} />);
+
+    await screen.findAllByText("Session A");
+    const dataTransfer = {
+      effectAllowed: "",
+      getData: vi.fn().mockReturnValue("a-session"),
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(
+      screen.getAllByRole("button", { name: /Session A/ })[0],
+      { dataTransfer },
+    );
+    fireEvent.drop(screen.getByText("Work").parentElement!, { dataTransfer });
+
+    await waitFor(() =>
+      expect(fake.client.assignSessionTag).toHaveBeenCalledWith("a-session", 7),
+    );
     expect(fake.client.startAgent).not.toHaveBeenCalled();
+  });
+
+  it("opens a context menu and renames a session inline", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+    const session = (
+      await screen.findAllByRole("button", { name: /Session A/ })
+    )[0];
+
+    fireEvent.contextMenu(session, { clientX: 20, clientY: 20 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByRole("textbox", {
+      name: "Rename session Session A",
+    });
+    fireEvent.change(input, { target: { value: "Renamed" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(fake.client.sendRpc).toHaveBeenCalledWith(
+        { projectId: "workspace-a", sessionId: "a-session" },
+        expect.objectContaining({ type: "set_session_name", name: "Renamed" }),
+      ),
+    );
   });
 
   it("deduplicates background terminal notifications and clears them on workspace replacement", async () => {

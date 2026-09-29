@@ -22,6 +22,19 @@ describe("desktop layout", () => {
     );
   });
 
+  it("uses system typography and compact icon-based sidebar controls", () => {
+    expect(styles).toMatch(
+      /:root\s*\{[^}]*font-family:\s*-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif/s,
+    );
+    expect(styles).toMatch(
+      /\.session-status\.is-running\s*\{\s*color:\s*#3677a8/s,
+    );
+    expect(styles).toMatch(
+      /\.notification-toggle svg\s*\{[^}]*stroke:\s*currentColor/s,
+    );
+    expect(styles).toMatch(/\.new-tag-form\s*\{[^}]*display:\s*flex/s);
+  });
+
   it("styles the rename control as an icon button", () => {
     expect(styles).toMatch(/\.rename-session\s*\{[^}]*height:\s*25px/s);
     expect(styles).toMatch(/\.rename-session svg\s*\{[^}]*width:\s*14px/s);
