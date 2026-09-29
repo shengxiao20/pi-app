@@ -11,7 +11,7 @@ describe("desktop layout", () => {
     );
   });
 
-  it("keeps top New chat fixed above Projects and visible Recents", () => {
+  it("keeps top New chat fixed above a compact project tree and visible Recents", () => {
     expect(styles).toMatch(
       /\.workspace-navigation\s*\{[\s\S]*?grid-template-rows:\s*40px minmax\(0,\s*1fr\) minmax\(112px,\s*0\.8fr\)/s,
     );
@@ -19,6 +19,11 @@ describe("desktop layout", () => {
       /\.new-session\s*\{[\s\S]*?height:\s*40px[\s\S]*?min-height:\s*40px/s,
     );
     expect(styles).toMatch(/\.project-navigation\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(styles).toMatch(/\.project-actions button\s*\{[^}]*height:\s*24px/s);
+    expect(styles).toMatch(
+      /\.project-session-list\s*\{[^}]*padding-left:\s*18px/s,
+    );
+    expect(styles).toMatch(/\.skills-placeholder\s*\{[^}]*min-height:\s*72px/s);
     expect(styles).toMatch(/\.recents\s*\{[^}]*min-height:\s*112px/s);
   });
 

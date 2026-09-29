@@ -102,6 +102,9 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const [hideToolCalls, setHideToolCalls] = useState(false);
   const [sessions, setSessions] = useState<WorkspaceSession[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [runtimeState, dispatchRuntime] = useReducer(
     workspaceReducer,
     undefined,
@@ -273,6 +276,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         if (active) {
           setDirectory(workspace.directory);
           setProjects(uniqueProjects(await client.listProjects()));
+          setExpandedProjects(new Set([workspace.projectId]));
           projectIdRef.current = workspace.projectId;
           setProjectId(workspace.projectId);
           setSessions(workspace.sessions);
@@ -382,17 +386,18 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   }
 
   async function createSession() {
-    if (!isSessionInteractive(activeRuntime)) return;
+    if (!isSessionInteractive(activeRuntime) || !activeSession) return;
     const id = `session-${sessionSequence.current++}`;
     try {
+      const priorTarget = activeTarget(projectId, activeSessionId);
+      await ensureRuntimeStarted(priorTarget, activeSession.sessionPath);
       assertResponse(
-        await client.sendRpc(activeTarget(projectId, activeSessionId), {
+        await client.sendRpc(priorTarget, {
           id,
           type: "new_session",
         }),
         "new session",
       );
-      const priorTarget = activeTarget(projectId, activeSessionId);
       const metadata = await getSessionMetadata(
         client,
         priorTarget,
@@ -696,48 +701,87 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             className="project-navigation"
             aria-labelledby="projects-heading"
           >
+            <button
+              className="change-workspace"
+              disabled={status === "starting"}
+              onClick={() => void changeWorkspace()}
+              type="button"
+            >
+              Change workspace
+            </button>
             <div className="project-heading">
               <h2 id="projects-heading">Projects</h2>
               <p className="current-directory" title={directory}>
                 {directory || "No workspace selected"}
               </p>
-              <button
-                className="change-workspace"
-                disabled={status === "starting"}
-                onClick={() => void changeWorkspace()}
-                type="button"
-              >
-                Change workspace
-              </button>
             </div>
             <div className="project-list">
-              {projects.map((project) => (
-                <button
-                  aria-current={project.id === projectId ? "page" : undefined}
-                  aria-label={`${project.displayName}${project.id === projectId ? " Current project" : ""}`}
-                  className="project-select"
-                  key={project.id}
-                  onClick={() => void selectProject(project)}
-                  type="button"
-                >
-                  <strong>{project.displayName}</strong>
-                  {(() => {
-                    const summary = projectRuntimeSummary(
-                      runtimeState,
-                      project.id,
-                    );
-                    return (
-                      (summary.running || summary.unread) && (
-                        <span
-                          aria-label={`Project status: ${summary.running ? "running" : "unread"}`}
-                        >
-                          {summary.running ? " Running" : " Unread"}
-                        </span>
-                      )
-                    );
-                  })()}
-                </button>
-              ))}
+              {projects.map((project) => {
+                const expanded = expandedProjects.has(project.id);
+                const selected = project.id === projectId;
+                const summary = projectRuntimeSummary(runtimeState, project.id);
+                return (
+                  <div className="project-tree" key={project.id}>
+                    <div className="project-row">
+                      <button
+                        aria-current={selected ? "page" : undefined}
+                        aria-label={`Select project ${project.displayName}${selected ? " Current project" : ""}`}
+                        className="project-select"
+                        onClick={() => void selectProject(project)}
+                        type="button"
+                      >
+                        <strong>{project.displayName}</strong>
+                        {(summary.running || summary.unread) && (
+                          <span
+                            aria-label={`Project status: ${summary.running ? "running" : "unread"}`}
+                          >
+                            {summary.running ? " Running" : " Unread"}
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? "Collapse" : "Expand"} sessions for ${project.displayName}`}
+                        className="project-toggle"
+                        onClick={() =>
+                          setExpandedProjects((current) => {
+                            const next = new Set(current);
+                            if (next.has(project.id)) next.delete(project.id);
+                            else next.add(project.id);
+                            return next;
+                          })
+                        }
+                        type="button"
+                      >
+                        {expanded ? "−" : "+"}
+                      </button>
+                    </div>
+                    {expanded && selected && (
+                      <div className="project-session-list">
+                        {sessions.map((session) => (
+                          <button
+                            aria-current={
+                              session.id === activeSessionId
+                                ? "page"
+                                : undefined
+                            }
+                            aria-label={`Open session ${session.title}`}
+                            className="project-session-select"
+                            key={session.id}
+                            onClick={() => void selectSession(session)}
+                            type="button"
+                          >
+                            {session.title}
+                          </button>
+                        ))}
+                        {!sessions.length && (
+                          <p className="empty-projects">No sessions.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {!projects.length && (
                 <p className="empty-projects">Add a project to begin.</p>
               )}
@@ -987,6 +1031,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           </div>
         </form>
       </section>
+      <aside aria-labelledby="skills-heading" className="skills-sidebar">
+        <h2 id="skills-heading">Skills</h2>
+        <p className="skills-placeholder">Skills will appear here.</p>
+      </aside>
       {dialog?.kind === "rename-project" && (
         <form
           aria-label="Rename project"

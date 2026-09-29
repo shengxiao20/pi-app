@@ -152,12 +152,14 @@ describe("App", () => {
     ).toBeTruthy();
     expect(
       (
-        await screen.findByRole("button", { name: "pi-app Current project" })
+        await screen.findByRole("button", {
+          name: "Select project pi-app Current project",
+        })
       ).getAttribute("aria-current"),
     ).toBe("page");
   });
 
-  it("orders the fixed New chat control above visible Projects and Recents", async () => {
+  it("places workspace switching above the Projects tree and reserves a Skills panel", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);
 
@@ -171,7 +173,37 @@ describe("App", () => {
           : element.getAttribute("aria-labelledby"),
       ),
     ).toEqual(["new-chat", "projects-heading", "recents-heading"]);
-    expect(screen.getByRole("heading", { name: "Recents" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Change workspace" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Skills" })).toBeTruthy();
+  });
+
+  it("expands the selected project to reveal its sessions and can collapse it", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+
+    await screen.findByRole("heading", { name: "Terminal conversation" });
+    expect(
+      screen.getByRole("button", { name: /Collapse sessions for pi-app/ }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "Open session Terminal conversation",
+      }),
+    ).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Collapse sessions for pi-app/ }),
+    );
+    expect(
+      screen.queryByRole("button", {
+        name: "Open session Terminal conversation",
+      }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /Expand sessions for pi-app/ }),
+    ).toBeTruthy();
   });
 
   it("selects a project from the persistent sidebar without aborting its active session", async () => {
@@ -199,11 +231,13 @@ describe("App", () => {
     render(<App client={fake.client} />);
 
     await screen.findByRole("heading", { name: "Terminal conversation" });
-    await screen.findByRole("button", { name: /Other project/ });
+    await screen.findByRole("button", { name: "Select project Other project" });
     (
       fake.client.currentDirectory as ReturnType<typeof vi.fn>
     ).mockResolvedValue("/workspace/other");
-    fireEvent.click(screen.getByRole("button", { name: /Other project/ }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select project Other project" }),
+    );
     await waitFor(() =>
       expect(fake.client.selectProject).toHaveBeenCalledWith("other-project"),
     );
@@ -840,6 +874,12 @@ describe("App", () => {
     await screen.findByText("CONVERSATION");
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
 
+    await waitFor(() =>
+      expect(fake.client.startAgent).toHaveBeenCalledWith(
+        { projectId: "project", sessionId: "terminal-id" },
+        "/sessions/terminal.jsonl",
+      ),
+    );
     await waitFor(() =>
       expect(fake.client.sendRpc).toHaveBeenCalledWith(expect.any(Object), {
         id: "name-session-0",
