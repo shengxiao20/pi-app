@@ -11,20 +11,15 @@ describe("desktop layout", () => {
     );
   });
 
-  it("keeps top New chat fixed above a compact project tree and visible Recents", () => {
+  it("uses one scrollable Tags/session navigation surface", () => {
     expect(styles).toMatch(
-      /\.workspace-navigation\s*\{[\s\S]*?grid-template-rows:\s*40px minmax\(0,\s*1fr\) minmax\(112px,\s*0\.8fr\)/s,
+      /\.workspace-navigation\s*\{[\s\S]*?grid-template-rows:\s*40px auto minmax\(0,\s*1fr\)/s,
     );
+    expect(styles).toMatch(/\.session-list\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(styles).toMatch(/\.recents\s*\{[^}]*overflow:\s*hidden/s);
     expect(styles).toMatch(
-      /\.new-session\s*\{[\s\S]*?height:\s*40px[\s\S]*?min-height:\s*40px/s,
+      /\.session-copy strong\s*\{[^}]*text-overflow:\s*ellipsis/s,
     );
-    expect(styles).toMatch(/\.project-navigation\s*\{[^}]*overflow-y:\s*auto/s);
-    expect(styles).toMatch(/\.project-actions button\s*\{[^}]*height:\s*24px/s);
-    expect(styles).toMatch(
-      /\.project-session-list\s*\{[^}]*padding-left:\s*18px/s,
-    );
-    expect(styles).toMatch(/\.skills-placeholder\s*\{[^}]*min-height:\s*72px/s);
-    expect(styles).toMatch(/\.recents\s*\{[^}]*min-height:\s*112px/s);
   });
 
   it("styles the rename control as an icon button", () => {

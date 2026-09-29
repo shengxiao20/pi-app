@@ -1,9 +1,9 @@
 use tauri::Manager;
 
 pub mod commands;
-pub mod projects;
 pub mod rpc;
 pub mod runtime;
+pub mod tags;
 pub mod workspace;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,15 +18,16 @@ pub fn run() {
             commands::bind_session,
             commands::send_rpc,
             commands::abort_agent,
-            commands::current_directory,
-            commands::list_projects,
-            commands::add_project,
-            commands::select_project,
-            commands::rename_project,
-            commands::remove_project,
+            commands::current_workspace,
             commands::choose_workspace,
             commands::list_sessions,
             commands::session_history,
+            commands::list_tags,
+            commands::create_tag,
+            commands::rename_tag,
+            commands::delete_tag,
+            commands::list_session_tag_assignments,
+            commands::assign_session_tag,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Pi App desktop client")

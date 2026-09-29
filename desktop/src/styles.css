@@ -1024,3 +1024,64 @@ textarea::placeholder {
     padding: 25px 18px 17px;
   }
 }
+
+/* Tags and sessions deliberately share this one scrollable navigation surface. */
+.workspace-navigation {
+  grid-template-rows: 40px auto minmax(0, 1fr);
+}
+.workspace-heading {
+  display: grid;
+  gap: 7px;
+}
+.recents {
+  min-height: 0;
+  overflow: hidden;
+}
+.session-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+.tag-list-heading,
+.tag-row {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+.tag-list-heading {
+  justify-content: space-between;
+}
+.tag-row {
+  padding: 5px 8px;
+}
+.tag-row strong {
+  color: #4a5664;
+  font:
+    700 10px/1 "SFMono-Regular",
+    Consolas,
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tag-toggle,
+.create-tag {
+  background: transparent;
+  color: #4a5664;
+  font:
+    16px/1 "SFMono-Regular",
+    Consolas,
+    monospace;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 2px;
+}
+.tag-toggle:hover,
+.create-tag:hover {
+  background: #e0e6e9;
+}
+.session-copy strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

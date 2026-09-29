@@ -11,16 +11,15 @@ import ReactMarkdown from "react-markdown";
 import type {
   PersistedSession,
   PiClient,
-  Project,
   RpcRecord,
+  Tag,
+  SessionTagAssignment,
   RuntimeEvent,
-  ProjectRuntimeSnapshot,
 } from "./pi-client";
 import { tauriPiClient } from "./pi-client";
 import {
   createWorkspaceState,
   isSessionInteractive,
-  projectRuntimeSummary,
   sessionKey,
   workspaceReducer,
 } from "./workspace-state";
@@ -66,14 +65,7 @@ type WorkspaceInitialization = {
   projectId: string;
   sessions: WorkspaceSession[];
 };
-type SessionDialog =
-  | { kind: "rename"; session: WorkspaceSession }
-  | { kind: "rename-project"; project: Project }
-  | {
-      kind: "remove-project";
-      project: Project;
-      snapshot: ProjectRuntimeSnapshot;
-    };
+type SessionDialog = { kind: "rename"; session: WorkspaceSession };
 type PiCommand = {
   name: string;
   description?: string;
@@ -101,10 +93,24 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const [showCommands, setShowCommands] = useState(false);
   const [hideToolCalls, setHideToolCalls] = useState(false);
   const [sessions, setSessions] = useState<WorkspaceSession[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
-    () => new Set(),
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [assignments, setAssignments] = useState<SessionTagAssignment[]>([]);
+  const [expandedTags, setExpandedTags] = useState<Set<string>>(
+    () => new Set(["uncategorized"]),
   );
+  const [tagMenu, setTagMenu] = useState<number>();
+  const [notifications, setNotifications] = useState<
+    {
+      key: string;
+      sessionId: string;
+      title: string;
+      status: string;
+      read: boolean;
+      createdAt: number;
+    }[]
+  >([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const notifiedGenerations = useRef(new Map<string, number>());
   const [runtimeState, dispatchRuntime] = useReducer(
     workspaceReducer,
     undefined,
@@ -113,10 +119,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const [dialog, setDialog] = useState<SessionDialog>();
   const [directory, setDirectory] = useState("");
   const [projectId, setProjectId] = useState<string>();
-  const currentProject = projects.find((project) => project.id === projectId);
   const projectIdRef = useRef<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState(INITIAL_SESSION_ID);
   const activeSessionIdRef = useRef(INITIAL_SESSION_ID);
+  const sessionsRef = useRef<WorkspaceSession[]>([]);
   const requestSequence = useRef(0);
   const agentRunObserved = useRef(false);
   const discoveredCommands = useRef<PiCommand[]>([]);
@@ -152,6 +158,10 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   }, [activeSessionId]);
 
   useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
 
@@ -177,6 +187,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       event,
       ...identity
     }: RuntimeEvent) => {
+      if (eventProjectId !== projectIdRef.current) return;
       const selected = sessionKey(
         projectIdRef.current ?? "",
         activeSessionIdRef.current,
@@ -186,9 +197,39 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         active: selected,
         event: { projectId: eventProjectId, sessionId, event, ...identity },
       });
+      const terminalStatus = terminalStatusForEvent(event);
+      const notificationTarget = `${eventProjectId}:${sessionId}`;
+      const notificationKey = `${notificationTarget}:${identity.generation}`;
+      const notifiedGeneration =
+        notifiedGenerations.current.get(notificationTarget);
+      if (
+        terminalStatus &&
+        sessionId !== activeSessionIdRef.current &&
+        (notifiedGeneration === undefined ||
+          identity.generation > notifiedGeneration)
+      ) {
+        notifiedGenerations.current.set(
+          notificationTarget,
+          identity.generation,
+        );
+        setNotifications((current) => [
+          ...current.filter(
+            (item) => !item.key.startsWith(`${notificationTarget}:`),
+          ),
+          {
+            key: notificationKey,
+            sessionId,
+            title:
+              sessionsRef.current.find((session) => session.id === sessionId)
+                ?.title ?? sessionId,
+            status: terminalStatus,
+            read: false,
+            createdAt: Date.now(),
+          },
+        ]);
+      }
       // The normalized store retains every target. The presentation list is
       // updated only for its own project while persisted history is loading.
-      if (eventProjectId !== projectIdRef.current) return;
       if (event.type === "bridge_error") {
         if (sessionId === activeSessionIdRef.current)
           setError(
@@ -275,11 +316,15 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         const workspace = await startup.current;
         if (active) {
           setDirectory(workspace.directory);
-          setProjects(uniqueProjects(await client.listProjects()));
-          setExpandedProjects(new Set([workspace.projectId]));
           projectIdRef.current = workspace.projectId;
           setProjectId(workspace.projectId);
           setSessions(workspace.sessions);
+          const [nextTags, nextAssignments] = await Promise.all([
+            client.listTags(),
+            client.listSessionTagAssignments(),
+          ]);
+          setTags(nextTags);
+          setAssignments(nextAssignments);
           activeSessionIdRef.current =
             workspace.activeSession?.id ?? INITIAL_SESSION_ID;
           setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
@@ -295,72 +340,6 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     };
   }, [client, handleEvent]);
 
-  async function selectProject(nextProject: Project) {
-    if (nextProject.id === projectId) return;
-    try {
-      await client.selectProject(nextProject.id);
-      setStatus("starting");
-      setError(undefined);
-      setDraft("");
-      resetCommandDiscovery();
-      const workspace = await initializeWorkspace(client);
-      setDirectory(workspace.directory);
-      projectIdRef.current = workspace.projectId;
-      setProjectId(workspace.projectId);
-      setSessions(workspace.sessions);
-      activeSessionIdRef.current =
-        workspace.activeSession?.id ?? INITIAL_SESSION_ID;
-      setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
-      setProjects(uniqueProjects(await client.listProjects()));
-      setStatus("ready");
-    } catch (reason) {
-      fail(setError, setStatus, reason);
-    }
-  }
-
-  async function saveProjectRename(project: Project, value: string) {
-    const displayName = value.trim();
-    if (!displayName || displayName === project.displayName) return;
-    try {
-      await client.renameProject(project.id, displayName);
-      setProjects((current) =>
-        current.map((item) =>
-          item.id === project.id ? { ...item, displayName } : item,
-        ),
-      );
-      setDialog(undefined);
-    } catch (reason) {
-      fail(setError, setStatus, reason);
-    }
-  }
-
-  async function showRemoveProject(project: Project) {
-    try {
-      const snapshot = await client.projectRuntimeSnapshot(project.id);
-      setDialog({ kind: "remove-project", project, snapshot });
-    } catch (reason) {
-      fail(setError, setStatus, reason);
-    }
-  }
-
-  async function removeCurrentProject(
-    project: Project,
-    snapshot: ProjectRuntimeSnapshot,
-  ) {
-    try {
-      await client.removeProject(project.id, snapshot);
-      setProjects((current) =>
-        current.filter((item) => item.id !== project.id),
-      );
-      setDialog(undefined);
-      setProjectId(undefined);
-      setSessions([]);
-      setDirectory("");
-    } catch (reason) {
-      fail(setError, setStatus, reason);
-    }
-  }
-
   async function changeWorkspace() {
     if (status === "streaming" || status === "starting") return;
     try {
@@ -370,16 +349,77 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       setError(undefined);
       setDraft("");
       resetCommandDiscovery();
+      if (projectIdRef.current)
+        dispatchRuntime({
+          type: "remove-workspace",
+          projectId: projectIdRef.current,
+        });
       const workspace = await initializeWorkspace(client);
       setDirectory(workspace.directory);
       projectIdRef.current = workspace.projectId;
       setProjectId(workspace.projectId);
       setSessions(workspace.sessions);
+      const [nextTags, nextAssignments] = await Promise.all([
+        client.listTags(),
+        client.listSessionTagAssignments(),
+      ]);
+      setTags(nextTags);
+      setAssignments(nextAssignments);
+      notifiedGenerations.current.clear();
+      setNotifications([]);
+      setNotificationsOpen(false);
       activeSessionIdRef.current =
         workspace.activeSession?.id ?? INITIAL_SESSION_ID;
       setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
-      setProjects(uniqueProjects(await client.listProjects()));
       setStatus("ready");
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
+
+  async function assignTag(sessionId: string, tagId: number | null) {
+    try {
+      await client.assignSessionTag(sessionId, tagId);
+      setAssignments(await client.listSessionTagAssignments());
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
+
+  async function renameTag(tag: Tag) {
+    const name = window.prompt("Tag name", tag.name);
+    if (!name) return;
+    try {
+      await client.renameTag(tag.id, name);
+      setTags(await client.listTags());
+      setTagMenu(undefined);
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
+
+  async function removeTag(tag: Tag) {
+    if (!window.confirm(`Remove tag ${tag.name}?`)) return;
+    try {
+      await client.deleteTag(tag.id);
+      const [nextTags, nextAssignments] = await Promise.all([
+        client.listTags(),
+        client.listSessionTagAssignments(),
+      ]);
+      setTags(nextTags);
+      setAssignments(nextAssignments);
+      setTagMenu(undefined);
+    } catch (reason) {
+      fail(setError, setStatus, reason);
+    }
+  }
+
+  async function createTag() {
+    const name = window.prompt("Tag name");
+    if (!name) return;
+    try {
+      await client.createTag(name);
+      setTags(await client.listTags());
     } catch (reason) {
       fail(setError, setStatus, reason);
     }
@@ -453,7 +493,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         ...current,
         historyLoading: true,
       }));
-      const history = await getHistory(client, projectId, session.sessionPath);
+      const history = await getHistory(client, session.sessionPath);
       updateSession(session.id, setSessions, (current) => ({
         ...current,
         historyLoaded: true,
@@ -485,10 +525,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       historyLoading: true,
     }));
     try {
-      if (!projectId)
-        throw new Error("Select a project before loading history");
       const page = await client.sessionHistory(
-        projectId,
         session.sessionPath,
         session.historyBefore,
         HISTORY_PAGE_SIZE,
@@ -697,196 +734,251 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           >
             <span aria-hidden="true">+</span> New chat
           </button>
-          <section
-            className="project-navigation"
-            aria-labelledby="projects-heading"
-          >
+          <section className="notification-center" aria-label="Notifications">
             <button
-              className="change-workspace"
-              disabled={status === "starting"}
-              onClick={() => void changeWorkspace()}
+              aria-expanded={notificationsOpen}
+              aria-label={`Notifications: ${notifications.filter((item) => !item.read).length} unread`}
+              onClick={() => setNotificationsOpen((open) => !open)}
               type="button"
             >
-              Change workspace
+              💡 {notifications.filter((item) => !item.read).length || ""}
             </button>
-            <div className="project-heading">
-              <h2 id="projects-heading">Projects</h2>
-              <p className="current-directory" title={directory}>
-                {directory || "No workspace selected"}
-              </p>
-            </div>
-            <div className="project-list">
-              {projects.map((project) => {
-                const expanded = expandedProjects.has(project.id);
-                const selected = project.id === projectId;
-                const summary = projectRuntimeSummary(runtimeState, project.id);
-                return (
-                  <div className="project-tree" key={project.id}>
-                    <div className="project-row">
-                      <button
-                        aria-current={selected ? "page" : undefined}
-                        aria-label={`Select project ${project.displayName}${selected ? " Current project" : ""}`}
-                        className="project-select"
-                        onClick={() => void selectProject(project)}
-                        type="button"
-                      >
-                        <strong>{project.displayName}</strong>
-                        {(summary.running || summary.unread) && (
-                          <span
-                            aria-label={`Project status: ${summary.running ? "running" : "unread"}`}
-                          >
-                            {summary.running ? " Running" : " Unread"}
-                          </span>
-                        )}
-                      </button>
-                      <button
-                        aria-expanded={expanded}
-                        aria-label={`${expanded ? "Collapse" : "Expand"} sessions for ${project.displayName}`}
-                        className="project-toggle"
-                        onClick={() =>
-                          setExpandedProjects((current) => {
-                            const next = new Set(current);
-                            if (next.has(project.id)) next.delete(project.id);
-                            else next.add(project.id);
-                            return next;
-                          })
-                        }
-                        type="button"
-                      >
-                        {expanded ? "−" : "+"}
-                      </button>
-                    </div>
-                    {expanded && selected && (
-                      <div className="project-session-list">
-                        {sessions.map((session) => (
-                          <button
-                            aria-current={
-                              session.id === activeSessionId
-                                ? "page"
-                                : undefined
-                            }
-                            aria-label={`Open session ${session.title}`}
-                            className="project-session-select"
-                            key={session.id}
-                            onClick={() => void selectSession(session)}
-                            type="button"
-                          >
-                            {session.title}
-                          </button>
-                        ))}
-                        {!sessions.length && (
-                          <p className="empty-projects">No sessions.</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {!projects.length && (
-                <p className="empty-projects">Add a project to begin.</p>
-              )}
-            </div>
-            {currentProject && (
-              <div className="project-actions">
-                <button
-                  aria-label="Rename current project"
-                  onClick={() =>
-                    setDialog({
-                      kind: "rename-project",
-                      project: currentProject,
-                    })
-                  }
-                  type="button"
-                >
-                  Rename
-                </button>
-                <button
-                  aria-label="Remove current project"
-                  onClick={() => void showRemoveProject(currentProject)}
-                  type="button"
-                >
-                  Remove
-                </button>
+            {notificationsOpen && (
+              <div role="list">
+                {notifications.map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => {
+                      const session = sessions.find(
+                        ({ id }) => id === item.sessionId,
+                      );
+                      if (session) void selectSession(session);
+                      setNotifications((current) =>
+                        current.map((entry) =>
+                          entry.key === item.key
+                            ? { ...entry, read: true }
+                            : entry,
+                        ),
+                      );
+                    }}
+                    role="listitem"
+                    type="button"
+                  >
+                    {item.title}: {item.status}
+                  </button>
+                ))}
               </div>
             )}
+          </section>
+          <section
+            className="workspace-heading"
+            aria-labelledby="workspace-heading"
+          >
+            <div className="project-heading">
+              <h2 id="workspace-heading">Workspace</h2>
+              <button
+                className="change-workspace"
+                disabled={status === "starting"}
+                onClick={() => void changeWorkspace()}
+                type="button"
+              >
+                Change workspace
+              </button>
+            </div>
+            <p className="current-directory" title={directory}>
+              {directory || "No workspace selected"}
+            </p>
           </section>
           <section
             className="navigation-section recents"
             aria-labelledby="recents-heading"
           >
-            <h2 id="recents-heading">Recents</h2>
+            <div className="tag-list-heading">
+              <h2 id="recents-heading">Tags</h2>
+              <button
+                aria-label="Create tag"
+                className="create-tag"
+                onClick={() => void createTag()}
+                type="button"
+              >
+                +
+              </button>
+            </div>
             <div className="session-list">
               {!sessions.length && (
-                <p className="empty-projects">No sessions in this project.</p>
+                <p className="empty-projects">No sessions in this workspace.</p>
               )}
-              {sessions.map((session) => (
-                <div className="session-item" key={session.id}>
-                  <button
-                    aria-current={
-                      session.id === activeSessionId ? "page" : undefined
-                    }
-                    aria-describedby={`session-status-${session.id}`}
-                    className="session-select"
-                    onClick={() => void selectSession(session)}
-                    type="button"
-                  >
-                    <span className="session-copy">
-                      <strong>{session.title}</strong>
-                      {runtimeState.sessions[
-                        sessionKey(projectId ?? "", session.id)
-                      ]?.unread && (
-                        <span
-                          aria-label="Unread updates"
-                          className="session-unread"
-                        />
-                      )}
-                      <small>
-                        {lastMessageText(session.history) ||
-                          "Empty conversation"}
-                      </small>
-                      <small aria-hidden="true" className="session-status" />
-                    </span>
-                  </button>
-                  <span
-                    className="visually-hidden"
-                    id={`session-status-${session.id}`}
-                  >
-                    Session status:{" "}
-                    {runtimeState.sessions[
-                      sessionKey(projectId ?? "", session.id)
-                    ]?.status ?? "idle"}
-                  </span>
-                  <div className="session-actions">
+              {groupedSessions(tags, assignments, sessions).map((group) => (
+                <section className="tag-group" key={group.id}>
+                  <div className="tag-row">
                     <button
-                      aria-label={`Rename session ${session.title}`}
-                      className="rename-session"
-                      disabled={sessionStatus === "streaming"}
-                      onClick={() => setDialog({ kind: "rename", session })}
+                      aria-expanded={expandedTags.has(group.id)}
+                      aria-label={`${expandedTags.has(group.id) ? "Collapse" : "Expand"} ${group.name}`}
+                      className="tag-toggle"
+                      onClick={() =>
+                        setExpandedTags((current) => {
+                          const next = new Set(current);
+                          if (next.has(group.id)) next.delete(group.id);
+                          else next.add(group.id);
+                          return next;
+                        })
+                      }
                       type="button"
                     >
-                      <svg
-                        aria-hidden="true"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          d="m4 16.5-.5 4 4-.5L19 8.5 15.5 5 4 16.5Z"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="1.8"
-                        />
-                        <path
-                          d="m14.5 6 3.5 3.5"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeWidth="1.8"
-                        />
-                      </svg>
+                      {expandedTags.has(group.id) ? "−" : "+"}
                     </button>
+                    <strong>{group.name}</strong>
+                    {group.tag && (
+                      <>
+                        <button
+                          aria-expanded={tagMenu === group.tag.id}
+                          aria-haspopup="menu"
+                          aria-label={`Tag actions for ${group.name}`}
+                          className="tag-actions"
+                          onClick={() =>
+                            setTagMenu((current) =>
+                              current === group.tag?.id
+                                ? undefined
+                                : group.tag?.id,
+                            )
+                          }
+                          type="button"
+                        >
+                          …
+                        </button>
+                        {tagMenu === group.tag.id && (
+                          <div
+                            aria-label={`${group.name} actions`}
+                            className="tag-menu"
+                            role="menu"
+                          >
+                            <button
+                              onClick={() => void renameTag(group.tag!)}
+                              role="menuitem"
+                              type="button"
+                            >
+                              Rename
+                            </button>
+                            <button
+                              onClick={() => void removeTag(group.tag!)}
+                              role="menuitem"
+                              type="button"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
-                </div>
+                  {expandedTags.has(group.id) &&
+                    group.sessions.map((session) => (
+                      <div className="session-item" key={session.id}>
+                        <button
+                          aria-current={
+                            session.id === activeSessionId ? "page" : undefined
+                          }
+                          aria-describedby={`session-status-${session.id}`}
+                          className="session-select"
+                          onClick={() => void selectSession(session)}
+                          type="button"
+                        >
+                          <span className="session-copy">
+                            <strong>{session.title}</strong>
+                            {runtimeState.sessions[
+                              sessionKey(projectId ?? "", session.id)
+                            ]?.unread && (
+                              <span
+                                aria-label="Unread updates"
+                                className="session-unread"
+                              />
+                            )}
+                            <small>
+                              {lastMessageText(session.history) ||
+                                "Empty conversation"}
+                            </small>
+                            <span
+                              aria-hidden="true"
+                              className="session-status"
+                              title={`Session status: ${runtimeState.sessions[sessionKey(projectId ?? "", session.id)]?.status ?? "idle"}`}
+                            >
+                              {statusIcon(
+                                runtimeState.sessions[
+                                  sessionKey(projectId ?? "", session.id)
+                                ]?.status ?? "idle",
+                              )}
+                            </span>
+                          </span>
+                        </button>
+                        <span
+                          className="visually-hidden"
+                          id={`session-status-${session.id}`}
+                        >
+                          Session status:{" "}
+                          {runtimeState.sessions[
+                            sessionKey(projectId ?? "", session.id)
+                          ]?.status ?? "idle"}
+                        </span>
+                        <div className="session-actions">
+                          <label
+                            className="sr-only"
+                            htmlFor={`tag-${session.id}`}
+                          >
+                            Tag for {session.title}
+                          </label>
+                          <select
+                            id={`tag-${session.id}`}
+                            onChange={(event) =>
+                              void assignTag(
+                                session.id,
+                                event.target.value
+                                  ? Number(event.target.value)
+                                  : null,
+                              )
+                            }
+                            value={assignmentFor(assignments, session.id) ?? ""}
+                          >
+                            <option value="">Uncategorized</option>
+                            {tags.map((tag) => (
+                              <option key={tag.id} value={tag.id}>
+                                {tag.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            aria-label={`Rename session ${session.title}`}
+                            className="rename-session"
+                            disabled={sessionStatus === "streaming"}
+                            onClick={() =>
+                              setDialog({ kind: "rename", session })
+                            }
+                            type="button"
+                          >
+                            <svg
+                              aria-hidden="true"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              xmlns="http://www.w3.org/2000/svg"
+                            >
+                              <path
+                                d="m4 16.5-.5 4 4-.5L19 8.5 15.5 5 4 16.5Z"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.8"
+                              />
+                              <path
+                                d="m14.5 6 3.5 3.5"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeWidth="1.8"
+                              />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </section>
               ))}
             </div>
           </section>
@@ -978,7 +1070,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
               }
               if (event.key === "Escape") setShowCommands(false);
             }}
-            placeholder="Message Pi about this project…"
+            placeholder="Message Pi about this workspace…"
             role="combobox"
             value={draft}
           />
@@ -1031,65 +1123,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           </div>
         </form>
       </section>
-      <aside aria-labelledby="skills-heading" className="skills-sidebar">
-        <h2 id="skills-heading">Skills</h2>
-        <p className="skills-placeholder">Skills will appear here.</p>
-      </aside>
-      {dialog?.kind === "rename-project" && (
-        <form
-          aria-label="Rename project"
-          className="session-dialog"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            void saveProjectRename(
-              dialog.project,
-              String(form.get("project-name")),
-            );
-          }}
-        >
-          <label>
-            Project name
-            <input
-              defaultValue={dialog.project.displayName}
-              name="project-name"
-            />
-          </label>
-          <button type="submit">Save project name</button>
-          <button onClick={() => setDialog(undefined)} type="button">
-            Cancel
-          </button>
-        </form>
-      )}
-      {dialog?.kind === "remove-project" && (
-        <section aria-label="Remove project" className="session-dialog">
-          <p>
-            This removes only the project record; files and Pi session history
-            stay on disk.
-          </p>
-          {dialog.snapshot.targets.length > 0 && (
-            <>
-              <p>These running Pi tasks will be terminated:</p>
-              <ul>
-                {dialog.snapshot.targets.map((target) => (
-                  <li key={target.sessionId}>{target.sessionId}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          <button
-            onClick={() =>
-              void removeCurrentProject(dialog.project, dialog.snapshot)
-            }
-            type="button"
-          >
-            Remove project
-          </button>
-          <button onClick={() => setDialog(undefined)} type="button">
-            Cancel
-          </button>
-        </section>
-      )}
+
       {dialog?.kind === "rename" && (
         <form
           aria-label="Rename session"
@@ -1282,45 +1316,84 @@ function historyEntryKey(entry: HistoryEntry, index: number): string {
 async function initializeWorkspace(
   client: PiClient,
 ): Promise<WorkspaceInitialization> {
-  if (!(await client.currentDirectory()) && !(await client.chooseWorkspace())) {
-    throw new Error("Select a workspace to view its sessions.");
-  }
-  const directory = await client.currentDirectory();
-  if (!directory) throw new Error("Select a workspace before viewing sessions");
-  const project = (await client.listProjects()).find(
-    (candidate) => candidate.path === directory,
-  );
-  if (!project)
-    throw new Error("Selected workspace is missing its project identity");
-  const sessions = (await client.listSessions(project.id)).map(
-    workspaceSession,
-  );
+  const workspace =
+    (await client.currentWorkspace()) ?? (await client.chooseWorkspace());
+  if (!workspace) throw new Error("Select a workspace to view its sessions.");
+  const sessions = (await client.listSessions()).map(workspaceSession);
   const activeSession =
     sessions.find((session) => session.id === "terminal-id") ?? sessions[0];
-  if (!activeSession) return { directory, projectId: project.id, sessions };
+  if (!activeSession)
+    return { directory: workspace.path, projectId: workspace.id, sessions };
   const loaded = {
     ...activeSession,
     historyLoaded: true,
     historyLoading: false,
-    ...(await getHistory(client, project.id, activeSession.sessionPath)),
+    ...(await getHistory(client, activeSession.sessionPath)),
   };
   return {
     activeSession: loaded,
-    directory,
-    projectId: project.id,
+    directory: workspace.path,
+    projectId: workspace.id,
     sessions: sessions.map((session) =>
       session.id === loaded.id ? loaded : session,
     ),
   };
 }
 
-function uniqueProjects(projects: Project[]): Project[] {
-  const seen = new Set<string>();
-  return projects.filter((project) => {
-    if (seen.has(project.id)) return false;
-    seen.add(project.id);
-    return true;
-  });
+function statusIcon(status: string): string {
+  return (
+    {
+      idle: "○",
+      starting: "◌",
+      ready: "○",
+      streaming: "◐",
+      completed: "✓",
+      failed: "!",
+      aborted: "■",
+    }[status] ?? "○"
+  );
+}
+
+function terminalStatusForEvent(event: RpcRecord): string | undefined {
+  if (event.type === "bridge_error") return "failed";
+  if (event.type === "agent_aborted") return "aborted";
+  if (event.type === "agent_settled") return "completed";
+  return undefined;
+}
+
+function assignmentFor(assignments: SessionTagAssignment[], sessionId: string) {
+  return assignments.find((item) => item.sessionId === sessionId)?.tagId;
+}
+
+function groupedSessions(
+  tags: Tag[],
+  assignments: SessionTagAssignment[],
+  sessions: WorkspaceSession[],
+): { id: string; name: string; tag?: Tag; sessions: WorkspaceSession[] }[] {
+  const tagBySession = new Map(
+    assignments.map((item) => [item.sessionId, item.tagId]),
+  );
+  const groups = [
+    {
+      id: "uncategorized",
+      name: "Uncategorized",
+      sessions: [] as WorkspaceSession[],
+    },
+    ...tags.map((tag) => ({
+      id: String(tag.id),
+      name: tag.name,
+      tag,
+      sessions: [] as WorkspaceSession[],
+    })),
+  ];
+  const byId = new Map(groups.map((group) => [group.id, group]));
+  for (const session of sessions) {
+    const group = byId.get(
+      String(tagBySession.get(session.id) ?? "uncategorized"),
+    );
+    (group ?? groups[0]).sessions.push(session);
+  }
+  return groups;
 }
 
 function workspaceSession(session: PersistedSession): WorkspaceSession {
@@ -1368,7 +1441,6 @@ async function getSessionMetadata(
 
 async function getHistory(
   client: PiClient,
-  projectId: string,
   sessionPath: string,
 ): Promise<
   Pick<
@@ -1377,7 +1449,6 @@ async function getHistory(
   >
 > {
   const page = await client.sessionHistory(
-    projectId,
     sessionPath,
     Number.MAX_SAFE_INTEGER,
     HISTORY_PAGE_SIZE,

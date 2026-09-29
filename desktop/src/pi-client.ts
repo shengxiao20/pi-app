@@ -13,46 +13,39 @@ export type RuntimeEvent = RuntimeTarget & {
   event: RpcRecord;
 };
 
-export type ProjectRuntimeSnapshot = {
-  projectId: string;
-  targets: RuntimeTarget[];
-};
-
 export type PersistedHistoryPage = {
   messages: RpcRecord[];
   before: number;
   hasMore: boolean;
 };
 
-export type Project = {
+export type CurrentWorkspace = {
   id: string;
   path: string;
   displayName: string;
-  lastOpened: number;
 };
+
+export type Tag = { id: number; name: string };
+export type SessionTagAssignment = { sessionId: string; tagId: number | null };
 
 export interface PiClient {
   /** Activates a Pi child only for work on this target. An existing session path
    * makes the backend restore and verify Pi's active session before returning. */
   startAgent(target: RuntimeTarget, sessionPath?: string): Promise<void>;
   bindSession(target: RuntimeTarget, sessionId: string): Promise<RuntimeTarget>;
-  currentDirectory(): Promise<string | null>;
-  chooseWorkspace(): Promise<string | null>;
-  listProjects(): Promise<Project[]>;
-  addProject(path: string): Promise<Project>;
-  selectProject(projectId: string): Promise<Project>;
-  renameProject(projectId: string, displayName: string): Promise<Project>;
-  projectRuntimeSnapshot(projectId: string): Promise<ProjectRuntimeSnapshot>;
-  removeProject(
-    projectId: string,
-    snapshot: ProjectRuntimeSnapshot,
-  ): Promise<Project>;
+  currentWorkspace(): Promise<CurrentWorkspace | null>;
+  chooseWorkspace(): Promise<CurrentWorkspace | null>;
   sendRpc(target: RuntimeTarget, request: RpcRecord): Promise<RpcRecord>;
   abortAgent(target: RuntimeTarget): Promise<RpcRecord>;
   listen(handler: (event: RuntimeEvent) => void): Promise<() => void>;
-  listSessions(projectId: string): Promise<PersistedSession[]>;
+  listSessions(): Promise<PersistedSession[]>;
+  listTags(): Promise<Tag[]>;
+  createTag(name: string): Promise<Tag>;
+  renameTag(id: number, name: string): Promise<Tag>;
+  deleteTag(id: number): Promise<void>;
+  listSessionTagAssignments(): Promise<SessionTagAssignment[]>;
+  assignSessionTag(sessionId: string, tagId: number | null): Promise<void>;
   sessionHistory(
-    projectId: string,
     sessionPath: string,
     before: number,
     limit: number,
@@ -70,23 +63,20 @@ export const tauriPiClient: PiClient = {
     invoke("start_agent", { target, sessionPath }),
   bindSession: (target, sessionId) =>
     invoke<RuntimeTarget>("bind_session", { target, sessionId }),
-  currentDirectory: () => invoke<string | null>("current_directory"),
-  chooseWorkspace: () => invoke<string | null>("choose_workspace"),
-  listProjects: () => invoke<Project[]>("list_projects"),
-  addProject: (path) => invoke<Project>("add_project", { path }),
-  selectProject: (projectId) =>
-    invoke<Project>("select_project", { projectId }),
-  renameProject: (projectId, displayName) =>
-    invoke<Project>("rename_project", { projectId, displayName }),
-  projectRuntimeSnapshot: (projectId) =>
-    invoke<ProjectRuntimeSnapshot>("project_runtime_snapshot", { projectId }),
-  removeProject: (projectId, snapshot) =>
-    invoke<Project>("remove_project", { projectId, snapshot }),
+  currentWorkspace: () => invoke<CurrentWorkspace | null>("current_workspace"),
+  chooseWorkspace: () => invoke<CurrentWorkspace | null>("choose_workspace"),
   sendRpc: (target, request) => invoke("send_rpc", { target, request }),
   abortAgent: (target) => invoke("abort_agent", { target }),
-  listSessions: (projectId) => invoke("list_sessions", { projectId }),
-  sessionHistory: (projectId, sessionPath, before, limit) =>
-    invoke("session_history", { projectId, sessionPath, before, limit }),
+  listSessions: () => invoke("list_sessions"),
+  listTags: () => invoke("list_tags"),
+  createTag: (name) => invoke("create_tag", { name }),
+  renameTag: (id, name) => invoke("rename_tag", { id, name }),
+  deleteTag: (id) => invoke("delete_tag", { id }),
+  listSessionTagAssignments: () => invoke("list_session_tag_assignments"),
+  assignSessionTag: (sessionId, tagId) =>
+    invoke("assign_session_tag", { sessionId, tagId }),
+  sessionHistory: (sessionPath, before, limit) =>
+    invoke("session_history", { sessionPath, before, limit }),
   listen: async (handler) =>
     listen<RuntimeEvent>("pi-rpc-event", ({ payload }) => handler(payload)),
 };

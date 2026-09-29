@@ -233,6 +233,29 @@ describe("workspaceReducer", () => {
     });
   });
 
+  it("removes stale workspace sessions before a replacement workspace is shown", () => {
+    const current = sessionKey("workspace-a", "same-session");
+    const other = sessionKey("workspace-b", "same-session");
+    let state = createWorkspaceState();
+    for (const projectId of ["workspace-a", "workspace-b"]) {
+      state = workspaceReducer(state, {
+        type: "ensure-session",
+        projectId,
+        session: {
+          id: "same-session",
+          title: projectId,
+          sessionPath: `/${projectId}`,
+        },
+      });
+    }
+    state = workspaceReducer(state, {
+      type: "remove-workspace",
+      projectId: "workspace-a",
+    });
+    expect(state.sessions[current]).toBeUndefined();
+    expect(state.sessions[other]).toBeDefined();
+  });
+
   it("leaves an idle session interactive while another session streams", () => {
     const first = sessionKey("project", "first");
     const second = sessionKey("project", "second");

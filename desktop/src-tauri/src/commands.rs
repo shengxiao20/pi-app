@@ -1,4 +1,9 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    path::PathBuf,
+    sync::Arc,
+};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -6,22 +11,18 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
 use crate::{
-    projects::{Project, ProjectError},
     rpc::bridge::{rpc_event_name, AgentBridge, BridgeError},
-    runtime::{
-        ProjectRuntimeSnapshot, RuntimeBridge, RuntimeError, RuntimeEvent, RuntimeRegistry,
-        RuntimeTarget,
-    },
+    runtime::{RuntimeBridge, RuntimeError, RuntimeEvent, RuntimeRegistry, RuntimeTarget},
+    tags::{SessionTagAssignment, Tag, TagError, TagStore},
     workspace::{PersistedHistoryPage, PersistedSession, WorkspaceError, WorkspaceStore},
 };
 
-/// App state owns persisted project metadata and independent running session
-/// processes. UI selection is deliberately not a runtime routing mechanism.
+/// App state owns exactly one canonical workspace and independent session
+/// processes. Its opaque identity preserves runtime isolation without exposing a
+/// user-manageable Project catalog.
 pub struct AppState {
     runtimes: Arc<RuntimeRegistry<AgentBridge>>,
-    inherited_cwd: Option<PathBuf>,
     selected_directory: Mutex<Option<PathBuf>>,
-    projects: Mutex<Option<crate::projects::ProjectCatalog>>,
 }
 
 impl AppState {
@@ -42,48 +43,83 @@ impl AppState {
     fn with_inherited_cwd(inherited_cwd: Option<PathBuf>) -> Self {
         Self {
             runtimes: Arc::new(RuntimeRegistry::new()),
-            inherited_cwd: inherited_cwd.clone(),
             selected_directory: Mutex::new(inherited_cwd),
-            projects: Mutex::new(None),
         }
     }
 
-    fn catalog<'a>(
-        &'a self,
-        app: &AppHandle,
-        catalog: &'a mut Option<crate::projects::ProjectCatalog>,
-    ) -> Result<&'a mut crate::projects::ProjectCatalog, CommandError> {
-        if catalog.is_none() {
-            *catalog = Some(crate::projects::ProjectCatalog::load(
-                app.path().app_data_dir().map_err(|error| CommandError {
-                    message: error.to_string(),
-                })?,
-            )?);
-        }
-        Ok(catalog.as_mut().expect("catalog initialized"))
+    async fn workspace(&self) -> Result<CurrentWorkspace, CommandError> {
+        let path = self
+            .selected_directory
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| CommandError {
+                message: "Select a workspace to start Pi.".into(),
+            })?;
+        CurrentWorkspace::new(path)
     }
 
-    async fn initialize_inherited_project(&self, app: &AppHandle) -> Result<(), CommandError> {
-        let Some(cwd) = &self.inherited_cwd else {
-            return Ok(());
-        };
-        let mut catalog = self.projects.lock().await;
-        self.catalog(app, &mut catalog)?.upsert(cwd)?;
-        Ok(())
+    async fn workspace_store(&self) -> Result<WorkspaceStore, CommandError> {
+        let workspace = self.workspace().await?;
+        let sessions_path = default_session_directory(&workspace.path);
+        Ok(WorkspaceStore::new(workspace.path, sessions_path))
     }
 
-    async fn project_workspace(
+    fn tag_store(app: &AppHandle) -> Result<TagStore, CommandError> {
+        let app_data = app.path().app_data_dir().map_err(|error| CommandError {
+            message: error.to_string(),
+        })?;
+        std::fs::create_dir_all(&app_data).map_err(|error| CommandError {
+            message: format!("Cannot create app data directory: {error}"),
+        })?;
+        TagStore::open(app_data.join("tags.sqlite")).map_err(Into::into)
+    }
+
+    async fn validate_target(
         &self,
-        app: &AppHandle,
-        project_id: &str,
-    ) -> Result<WorkspaceStore, CommandError> {
-        self.initialize_inherited_project(app).await?;
-        let project = {
-            let mut catalog = self.projects.lock().await;
-            self.catalog(app, &mut catalog)?.get(project_id)?
-        };
-        let sessions_path = default_session_directory(&project.path);
-        Ok(WorkspaceStore::new(project.path, sessions_path))
+        target: &RuntimeTarget,
+    ) -> Result<CurrentWorkspace, CommandError> {
+        let workspace = self.workspace().await?;
+        if target.project_id != workspace.id {
+            return Err(CommandError {
+                message: "Runtime target is outside the current workspace.".into(),
+            });
+        }
+        Ok(workspace)
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentWorkspace {
+    id: String,
+    path: PathBuf,
+    display_name: String,
+}
+
+impl CurrentWorkspace {
+    fn new(path: PathBuf) -> Result<Self, CommandError> {
+        let path = path.canonicalize().map_err(|error| CommandError {
+            message: format!("Workspace directory is invalid: {error}"),
+        })?;
+        if !path.is_dir() {
+            return Err(CommandError {
+                message: "Workspace path is not a directory.".into(),
+            });
+        }
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        let display_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or("Workspace")
+            .to_owned();
+        Ok(Self {
+            id: format!("workspace-{:016x}", hasher.finish()),
+            path,
+            display_name,
+        })
     }
 }
 
@@ -103,7 +139,7 @@ fn default_session_directory(cwd: &std::path::Path) -> PathBuf {
         .join(safe_cwd)
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct CommandError {
     message: String,
 }
@@ -132,8 +168,8 @@ impl From<WorkspaceError> for CommandError {
     }
 }
 
-impl From<ProjectError> for CommandError {
-    fn from(error: ProjectError) -> Self {
+impl From<TagError> for CommandError {
+    fn from(error: TagError) -> Self {
         Self {
             message: error.to_string(),
         }
@@ -141,140 +177,36 @@ impl From<ProjectError> for CommandError {
 }
 
 #[tauri::command]
-pub async fn current_directory(
-    app: AppHandle,
+pub async fn current_workspace(
     state: State<'_, AppState>,
-) -> Result<Option<PathBuf>, CommandError> {
-    state.initialize_inherited_project(&app).await?;
-    Ok(state.selected_directory.lock().await.clone())
+) -> Result<Option<CurrentWorkspace>, CommandError> {
+    let directory = state.selected_directory.lock().await.clone();
+    directory.map(CurrentWorkspace::new).transpose()
 }
 
-#[tauri::command]
-pub async fn list_projects(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<Vec<Project>, CommandError> {
-    state.initialize_inherited_project(&app).await?;
-    let mut catalog = state.projects.lock().await;
-    Ok(state.catalog(&app, &mut catalog)?.projects())
-}
-
-#[tauri::command]
-pub async fn add_project(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    path: PathBuf,
-) -> Result<Project, CommandError> {
-    let project = {
-        let mut catalog = state.projects.lock().await;
-        state.catalog(&app, &mut catalog)?.upsert(path)?
-    };
-    *state.selected_directory.lock().await = Some(project.path.clone());
-    Ok(project)
-}
-
-#[tauri::command]
-pub async fn select_project(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    project_id: String,
-) -> Result<Project, CommandError> {
-    let project = {
-        let mut catalog = state.projects.lock().await;
-        state.catalog(&app, &mut catalog)?.touch(&project_id)?
-    };
-    *state.selected_directory.lock().await = Some(project.path.clone());
-    Ok(project)
-}
-
-#[tauri::command]
-pub async fn rename_project(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    project_id: String,
-    display_name: String,
-) -> Result<Project, CommandError> {
-    let mut catalog = state.projects.lock().await;
-    Ok(state
-        .catalog(&app, &mut catalog)?
-        .rename(&project_id, display_name)?)
-}
-
-#[tauri::command]
-pub async fn project_runtime_snapshot(
-    state: State<'_, AppState>,
-    project_id: String,
-) -> Result<ProjectRuntimeSnapshot, CommandError> {
-    Ok(state.runtimes.project_snapshot(&project_id).await)
-}
-
-#[tauri::command]
-pub async fn remove_project(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    project_id: String,
-    snapshot: ProjectRuntimeSnapshot,
-) -> Result<Project, CommandError> {
-    if snapshot.project_id != project_id {
-        return Err(CommandError {
-            message: "Removal confirmation does not match the project".into(),
-        });
-    }
-    let stop_errors = state.runtimes.drain_confirmed_project(&snapshot).await?;
-    if !stop_errors.is_empty() {
-        return Err(CommandError {
-            message: stop_errors
-                .into_iter()
-                .map(|error| error.to_string())
-                .collect::<Vec<_>>()
-                .join("; "),
-        });
-    }
-    let project = {
-        let mut catalog = state.projects.lock().await;
-        state.catalog(&app, &mut catalog)?.remove(&project_id)?
-    };
-    if state
-        .selected_directory
-        .lock()
-        .await
-        .as_ref()
-        .is_some_and(|directory| directory == &project.path)
-    {
-        *state.selected_directory.lock().await = None;
-    }
-    Ok(project)
-}
-
-/// Opens the native folder picker and replaces the cwd-bound Pi runtime when a
-/// directory is selected. Canceling the picker leaves the current workspace intact.
+/// Opens the native folder picker and atomically replaces the sole workspace.
+/// Canceling leaves the current workspace intact.
 #[tauri::command]
 pub async fn choose_workspace(
-    app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<Option<PathBuf>, CommandError> {
+) -> Result<Option<CurrentWorkspace>, CommandError> {
     let selected = tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder())
         .await
         .expect("workspace picker task must not panic");
-    let Some(cwd) = selected else {
+    let Some(path) = selected else {
         return Ok(None);
     };
-    let project = {
-        let mut catalog = state.projects.lock().await;
-        state.catalog(&app, &mut catalog)?.upsert(cwd)?
-    };
-    *state.selected_directory.lock().await = Some(project.path.clone());
-    Ok(Some(project.path))
+    let workspace = CurrentWorkspace::new(path)?;
+    *state.selected_directory.lock().await = Some(workspace.path.clone());
+    Ok(Some(workspace))
 }
 
 #[tauri::command]
 pub async fn list_sessions(
-    app: AppHandle,
     state: State<'_, AppState>,
-    project_id: String,
 ) -> Result<Vec<PersistedSession>, CommandError> {
     state
-        .project_workspace(&app, &project_id)
+        .workspace_store()
         .await?
         .list_sessions()
         .map_err(Into::into)
@@ -282,17 +214,65 @@ pub async fn list_sessions(
 
 #[tauri::command]
 pub async fn session_history(
-    app: AppHandle,
     state: State<'_, AppState>,
-    project_id: String,
     session_path: PathBuf,
     before: Option<usize>,
     limit: usize,
 ) -> Result<PersistedHistoryPage, CommandError> {
     state
-        .project_workspace(&app, &project_id)
+        .workspace_store()
         .await?
         .session_history(session_path, before, limit)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn list_tags(app: AppHandle) -> Result<Vec<Tag>, CommandError> {
+    AppState::tag_store(&app)?.list_tags().map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn create_tag(app: AppHandle, name: String) -> Result<Tag, CommandError> {
+    AppState::tag_store(&app)?
+        .create_tag(&name)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn rename_tag(app: AppHandle, id: i64, name: String) -> Result<Tag, CommandError> {
+    AppState::tag_store(&app)?
+        .rename_tag(id, &name)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn delete_tag(app: AppHandle, id: i64) -> Result<(), CommandError> {
+    AppState::tag_store(&app)?
+        .delete_tag(id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn list_session_tag_assignments(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<SessionTagAssignment>, CommandError> {
+    let workspace = state.workspace().await?;
+    AppState::tag_store(&app)?
+        .assignments(&workspace.path)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn assign_session_tag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    tag_id: Option<i64>,
+) -> Result<(), CommandError> {
+    let workspace = state.workspace().await?;
+    AppState::tag_store(&app)?
+        .assign(&workspace.path, &session_id, tag_id)
         .map_err(Into::into)
 }
 
@@ -303,14 +283,11 @@ pub async fn start_agent(
     target: RuntimeTarget,
     session_path: Option<PathBuf>,
 ) -> Result<(), CommandError> {
-    let project = {
-        let mut catalog = state.projects.lock().await;
-        state.catalog(&app, &mut catalog)?.get(&target.project_id)?
-    };
-    let bridge = Arc::new(AgentBridge::pi(&default_session_directory(&project.path)));
+    let workspace = state.validate_target(&target).await?;
+    let bridge = Arc::new(AgentBridge::pi(&default_session_directory(&workspace.path)));
     let generation = state
         .runtimes
-        .start(target.clone(), project.path, bridge.clone())
+        .start(target.clone(), workspace.path, bridge.clone())
         .await?;
 
     if let Some(session_path) = session_path {
@@ -370,6 +347,7 @@ pub async fn bind_session(
     target: RuntimeTarget,
     session_id: String,
 ) -> Result<RuntimeTarget, CommandError> {
+    state.validate_target(&target).await?;
     state
         .runtimes
         .rekey(&target, session_id)
@@ -383,6 +361,7 @@ pub async fn send_rpc(
     target: RuntimeTarget,
     request: Value,
 ) -> Result<Value, CommandError> {
+    state.validate_target(&target).await?;
     state
         .runtimes
         .send(&target, request)
@@ -395,6 +374,7 @@ pub async fn abort_agent(
     state: State<'_, AppState>,
     target: RuntimeTarget,
 ) -> Result<Value, CommandError> {
+    state.validate_target(&target).await?;
     state.runtimes.abort(&target).await.map_err(Into::into)
 }
 
@@ -409,7 +389,7 @@ mod tests {
 
     use serde_json::{json, Value};
 
-    use super::{restore_session, AppState};
+    use super::{restore_session, AppState, CurrentWorkspace};
     use crate::runtime::{RuntimeBridge, RuntimeError, RuntimeTarget};
 
     struct RestoreBridge {
@@ -512,13 +492,30 @@ mod tests {
     }
 
     #[test]
-    fn inherited_cwd_is_explicit_while_gui_start_has_no_project_source() {
-        let terminal_cwd = PathBuf::from("/tmp/pi-app-terminal-project");
+    fn canonical_workspace_has_a_stable_opaque_identity() {
+        let directory =
+            std::env::temp_dir().join(format!("pi-app-current-workspace-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let first = CurrentWorkspace::new(directory.clone()).unwrap();
+        let second = CurrentWorkspace::new(directory).unwrap();
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.path, second.path);
+    }
+
+    #[test]
+    fn inherited_cwd_is_the_initial_workspace_while_gui_start_has_none() {
+        let terminal_cwd = PathBuf::from("/tmp/pi-app-terminal-workspace");
         assert_eq!(
-            AppState::with_inherited_cwd(Some(terminal_cwd.clone())).inherited_cwd,
-            Some(terminal_cwd)
+            AppState::with_inherited_cwd(Some(terminal_cwd.clone()))
+                .selected_directory
+                .blocking_lock()
+                .as_deref(),
+            Some(terminal_cwd.as_path())
         );
-        assert_eq!(AppState::with_inherited_cwd(None).inherited_cwd, None);
+        assert!(AppState::with_inherited_cwd(None)
+            .selected_directory
+            .blocking_lock()
+            .is_none());
     }
 }
 

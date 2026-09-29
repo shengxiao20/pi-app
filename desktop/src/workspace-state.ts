@@ -70,6 +70,10 @@ export type WorkspaceAction =
       error?: string;
     }
   | { type: "select-session"; projectId: string; sessionId: string }
+  | {
+      type: "remove-workspace";
+      projectId: string;
+    }
   | { type: "runtime-event"; active?: string; event: RuntimeEvent };
 
 export function sessionKey(projectId: string, sessionId: string): string {
@@ -133,6 +137,15 @@ export function workspaceReducer(
         unread: false,
       }),
     );
+  }
+  if (action.type === "remove-workspace") {
+    return {
+      sessions: Object.fromEntries(
+        Object.entries(state.sessions).filter(
+          ([key]) => !key.startsWith(`${action.projectId}:`),
+        ),
+      ),
+    };
   }
 
   const key = sessionKey(action.event.projectId, action.event.sessionId);
