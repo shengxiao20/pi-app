@@ -5,6 +5,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -76,6 +77,13 @@ type PiCommand = {
   description?: string;
   source: "extension" | "prompt" | "skill";
 };
+type PointerDrag = {
+  pointerId: number;
+  sessionId: string;
+  startX: number;
+  startY: number;
+  isDragging: boolean;
+};
 
 const INITIAL_SESSION_ID = "session-initial";
 const HISTORY_PAGE_SIZE = 80;
@@ -108,7 +116,9 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const [renameValue, setRenameValue] = useState("");
   const [newTagName, setNewTagName] = useState("");
   const [creatingTag, setCreatingTag] = useState(false);
-  const [draggedSessionId, setDraggedSessionId] = useState<string>();
+  const [dropTargetGroupId, setDropTargetGroupId] = useState<string>();
+  const pointerDrag = useRef<PointerDrag | undefined>(undefined);
+  const pointerDragCleanup = useRef<(() => void) | undefined>(undefined);
   const [notifications, setNotifications] = useState<
     {
       key: string;
@@ -407,6 +417,85 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     } catch (reason) {
       fail(setError, setStatus, reason);
     }
+  }
+
+  function beginPointerDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    sessionId: string,
+  ) {
+    if (event.button > 0) return;
+    pointerDragCleanup.current?.();
+    const source = event.currentTarget;
+    source.setPointerCapture(event.pointerId);
+    pointerDrag.current = {
+      pointerId: event.pointerId,
+      sessionId,
+      startX: event.clientX,
+      startY: event.clientY,
+      isDragging: false,
+    };
+
+    function cleanup() {
+      source.removeEventListener("pointermove", handlePointerMove);
+      source.removeEventListener("pointerup", handlePointerUp);
+      source.removeEventListener("pointercancel", handlePointerCancel);
+      source.removeEventListener("lostpointercapture", handlePointerCancel);
+      if (pointerDragCleanup.current === cleanup)
+        pointerDragCleanup.current = undefined;
+    }
+
+    function clear() {
+      cleanup();
+      pointerDrag.current = undefined;
+      setDropTargetGroupId(undefined);
+    }
+
+    function groupAt(clientX: number, clientY: number): HTMLElement | null {
+      return (
+        document
+          .elementFromPoint(clientX, clientY)
+          ?.closest<HTMLElement>("[data-tag-group-id]") ?? null
+      );
+    }
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      const pointer = pointerDrag.current;
+      if (!pointer || moveEvent.pointerId !== pointer.pointerId) return;
+      if (
+        !pointer.isDragging &&
+        Math.hypot(
+          moveEvent.clientX - pointer.startX,
+          moveEvent.clientY - pointer.startY,
+        ) >= 6
+      )
+        pointer.isDragging = true;
+      if (pointer.isDragging)
+        setDropTargetGroupId(
+          groupAt(moveEvent.clientX, moveEvent.clientY)?.dataset.tagGroupId,
+        );
+    }
+
+    function handlePointerUp(upEvent: PointerEvent) {
+      const pointer = pointerDrag.current;
+      if (!pointer || upEvent.pointerId !== pointer.pointerId) return;
+      const group = pointer.isDragging
+        ? groupAt(upEvent.clientX, upEvent.clientY)
+        : null;
+      clear();
+      if (!group) return;
+      const tagId = group.dataset.tagId;
+      void assignTag(pointer.sessionId, tagId ? Number(tagId) : null);
+    }
+
+    function handlePointerCancel(cancelEvent: PointerEvent) {
+      if (pointerDrag.current?.pointerId === cancelEvent.pointerId) clear();
+    }
+
+    pointerDragCleanup.current = cleanup;
+    source.addEventListener("pointermove", handlePointerMove);
+    source.addEventListener("pointerup", handlePointerUp);
+    source.addEventListener("pointercancel", handlePointerCancel);
+    source.addEventListener("lostpointercapture", handlePointerCancel);
   }
 
   function beginRename(target: RenameTarget) {
@@ -907,9 +996,16 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                 <p className="empty-projects">No sessions in this workspace.</p>
               )}
               {groupedSessions(tags, assignments, sessions).map((group) => (
-                <section className="tag-group" key={group.id}>
+                <section
+                  className={`tag-group${
+                    dropTargetGroupId === group.id ? " is-drop-target" : ""
+                  }`}
+                  data-tag-group-id={group.id}
+                  data-tag-id={group.tag?.id}
+                  key={group.id}
+                >
                   <div
-                    className={`tag-row${draggedSessionId ? " is-drop-target" : ""}`}
+                    className="tag-row"
                     onContextMenu={(event) => {
                       if (!group.tag) return;
                       event.preventDefault();
@@ -919,17 +1015,6 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                         x: event.clientX,
                         y: event.clientY,
                       });
-                    }}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const sessionId =
-                        event.dataTransfer.getData(
-                          "application/x-pi-session",
-                        ) || draggedSessionId;
-                      if (sessionId)
-                        void assignTag(sessionId, group.tag?.id ?? null);
-                      setDraggedSessionId(undefined);
                     }}
                   >
                     {renameTarget?.kind === "tag" &&
@@ -973,24 +1058,13 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                     group.sessions.map((session) => (
                       <div className="session-item" key={session.id}>
                         <button
-                          draggable
-                          onDragEnd={() => setDraggedSessionId(undefined)}
-                          onDragStart={(event) => {
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData(
-                              "application/x-pi-session",
-                              session.id,
-                            );
-                            event.dataTransfer.setData(
-                              "text/plain",
-                              session.id,
-                            );
-                            setDraggedSessionId(session.id);
-                          }}
                           aria-current={
                             session.id === activeSessionId ? "page" : undefined
                           }
                           className="session-select"
+                          onPointerDown={(event) =>
+                            beginPointerDrag(event, session.id)
+                          }
                           onClick={() => void selectSession(session)}
                           onContextMenu={(event) => {
                             event.preventDefault();

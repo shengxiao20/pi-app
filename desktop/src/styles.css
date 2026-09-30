@@ -1135,7 +1135,8 @@ textarea::placeholder {
   stroke-width: 1.75;
   width: 14px;
 }
-.tag-row.is-drop-target {
+.tag-group.is-drop-target > .tag-row {
+  background: #dfeaf1;
   outline: 1px dashed #4f799b;
   outline-offset: -2px;
 }

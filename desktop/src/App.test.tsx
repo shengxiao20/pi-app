@@ -120,30 +120,75 @@ describe("App workspace boundary", () => {
     );
   });
 
-  it("moves a session to a tag by dropping its session row onto the tag group", async () => {
-    const fake = createClient();
-    fake.client.listTags = vi.fn().mockResolvedValue([{ id: 7, name: "Work" }]);
-    render(<App client={fake.client} />);
+  it.each([
+    ["Work", 7],
+    ["Uncategorized", null],
+  ] as const)(
+    "moves a session to %s after a captured pointer drag leaves the session row",
+    async (targetName, expectedTagId) => {
+      const fake = createClient();
+      fake.client.listTags = vi
+        .fn()
+        .mockResolvedValue([{ id: 7, name: "Work" }]);
+      fake.client.listSessionTagAssignments = vi
+        .fn()
+        .mockResolvedValue([{ sessionId: "a-session", tagId: 7 }]);
+      render(<App client={fake.client} />);
 
-    await screen.findAllByText("Session A");
-    const dataTransfer = {
-      effectAllowed: "",
-      getData: vi.fn((type: string) =>
-        type === "application/x-pi-session" ? "a-session" : "",
-      ),
-      setData: vi.fn(),
-    };
-    fireEvent.dragStart(
-      screen.getAllByRole("button", { name: /Session A/ })[0],
-      { dataTransfer },
-    );
-    fireEvent.drop(screen.getByText("Work"), { dataTransfer });
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Expand Work" }),
+      );
+      await act(async () => undefined);
+      const session = (
+        await screen.findAllByRole("button", { name: /Session A/ })
+      )[0];
+      const target = screen.getByText(targetName);
+      const elementFromPoint = vi
+        .fn()
+        .mockReturnValue(target.closest("section"));
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        value: elementFromPoint,
+      });
+      const setPointerCapture = vi.fn();
+      Object.defineProperty(HTMLElement.prototype, "setPointerCapture", {
+        configurable: true,
+        value: setPointerCapture,
+      });
 
-    await waitFor(() =>
-      expect(fake.client.assignSessionTag).toHaveBeenCalledWith("a-session", 7),
-    );
-    expect(fake.client.startAgent).not.toHaveBeenCalled();
-  });
+      const pointerDown = new window.MouseEvent("pointerdown", {
+        bubbles: true,
+        clientX: 10,
+        clientY: 10,
+      });
+      Object.defineProperty(pointerDown, "pointerId", { value: 1 });
+      session.dispatchEvent(pointerDown);
+      expect(setPointerCapture).toHaveBeenCalledWith(1);
+      // Pointer capture keeps the source handler alive even when the pointer is
+      // physically over the tag; elementFromPoint identifies that tag on release.
+      const pointerMove = new window.MouseEvent("pointermove", {
+        clientX: 20,
+        clientY: 20,
+      });
+      Object.defineProperty(pointerMove, "pointerId", { value: 1 });
+      session.dispatchEvent(pointerMove);
+      const pointerUp = new window.MouseEvent("pointerup", {
+        clientX: 20,
+        clientY: 20,
+      });
+      Object.defineProperty(pointerUp, "pointerId", { value: 1 });
+      session.dispatchEvent(pointerUp);
+      await waitFor(() =>
+        expect(fake.client.assignSessionTag).toHaveBeenCalledWith(
+          "a-session",
+          expectedTagId,
+        ),
+      );
+      delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+      delete (HTMLElement.prototype as { setPointerCapture?: unknown })
+        .setPointerCapture;
+    },
+  );
 
   it("expands a tag by clicking its text", async () => {
     const fake = createClient();
