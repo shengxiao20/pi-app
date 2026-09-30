@@ -5,6 +5,42 @@ import { describe, expect, it } from "vitest";
 const styles = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
 
 describe("desktop layout", () => {
+  it("keeps keyboard focus visibly distinct from the selected navigation item", () => {
+    expect(styles).toMatch(
+      /button:focus-visible,[\s\S]*?textarea:focus-visible\s*\{[^}]*outline:\s*3px solid #ba4b2f/s,
+    );
+  });
+
+  it("uses one scrollable Tags/session navigation surface", () => {
+    expect(styles).toMatch(
+      /\.workspace-navigation\s*\{[\s\S]*?grid-template-rows:\s*40px auto minmax\(0,\s*1fr\)/s,
+    );
+    expect(styles).toMatch(/\.session-list\s*\{[^}]*overflow-y:\s*auto/s);
+    expect(styles).toMatch(/\.recents\s*\{[^}]*overflow:\s*hidden/s);
+    expect(styles).toMatch(
+      /\.session-copy strong\s*\{[^}]*text-overflow:\s*ellipsis/s,
+    );
+  });
+
+  it("uses system typography and compact icon-based sidebar controls", () => {
+    expect(styles).toMatch(
+      /:root\s*\{[^}]*font-family:\s*-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif/s,
+    );
+    expect(styles).toMatch(
+      /\.session-status\.is-running\s*\{\s*color:\s*#3677a8/s,
+    );
+    expect(styles).toMatch(
+      /\.notification-toggle svg\s*\{[^}]*stroke:\s*currentColor/s,
+    );
+    expect(styles).toMatch(/\.new-tag-form\s*\{[^}]*display:\s*flex/s);
+  });
+
+  it("matches session inline rename typography to the session title", () => {
+    expect(styles).toMatch(
+      /\.session-copy \.inline-rename\s*\{[^}]*align-self:\s*center[^}]*font-size:\s*13px[^}]*font-weight:\s*700[^}]*line-height:\s*16px/s,
+    );
+  });
+
   it("styles the rename control as an icon button", () => {
     expect(styles).toMatch(/\.rename-session\s*\{[^}]*height:\s*25px/s);
     expect(styles).toMatch(/\.rename-session svg\s*\{[^}]*width:\s*14px/s);
