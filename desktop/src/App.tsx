@@ -15,13 +15,12 @@ import type {
   RpcRecord,
   Tag,
   SessionTagAssignment,
-  RuntimeEvent,
+  SessionProcessEvent,
 } from "./pi-client";
 import { tauriPiClient } from "./pi-client";
 import {
   createWorkspaceState,
   isSessionInteractive,
-  sessionKey,
   workspaceReducer,
 } from "./workspace-state";
 
@@ -63,15 +62,12 @@ type WorkspaceSession = {
 type WorkspaceInitialization = {
   activeSession?: WorkspaceSession;
   directory: string;
-  projectId: string;
   sessions: WorkspaceSession[];
 };
 type RenameTarget =
   | { kind: "tag"; tag: Tag }
   | { kind: "session"; session: WorkspaceSession };
-type ContextMenu =
-  | { kind: "tag"; tag: Tag; x: number; y: number }
-  | { kind: "session"; session: WorkspaceSession; x: number; y: number };
+type ContextMenu = { kind: "tag"; tag: Tag; x: number; y: number };
 type PiCommand = {
   name: string;
   description?: string;
@@ -87,15 +83,6 @@ type PointerDrag = {
 
 const INITIAL_SESSION_ID = "session-initial";
 const HISTORY_PAGE_SIZE = 80;
-
-function activeTarget(
-  projectId: string | undefined,
-  sessionId: string,
-): import("./pi-client").RuntimeTarget {
-  if (!projectId)
-    throw new Error("Select a project before sending Pi commands");
-  return { projectId, sessionId };
-}
 
 export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const [status, setStatus] = useState<ChatStatus>("idle");
@@ -137,8 +124,6 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     createWorkspaceState,
   );
   const [directory, setDirectory] = useState("");
-  const [projectId, setProjectId] = useState<string>();
-  const projectIdRef = useRef<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState(INITIAL_SESSION_ID);
   const activeSessionIdRef = useRef(INITIAL_SESSION_ID);
   const sessionsRef = useRef<WorkspaceSession[]>([]);
@@ -147,30 +132,24 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const discoveredCommands = useRef<PiCommand[]>([]);
   const commandDiscovery = useRef<Promise<void> | undefined>(undefined);
   const commandGeneration = useRef(0);
-  const sessionSequence = useRef(0);
   const loadingOlderSessions = useRef(new Set<string>());
-  const startedRuntimes = useRef(new Set<string>());
-  const startingRuntimes = useRef(new Map<string, Promise<void>>());
+  const startedSessions = useRef(new Set<string>());
+  const startingSessions = useRef(new Map<string, Promise<void>>());
   const startup = useRef<Promise<WorkspaceInitialization> | undefined>(
     undefined,
   );
   const activeSession = sessions.find(({ id }) => id === activeSessionId);
-  const activeRuntime = projectId
-    ? runtimeState.sessions[sessionKey(projectId, activeSessionId)]
-    : undefined;
+  const activeRuntime = runtimeState.sessions[activeSessionId];
   const sessionStatus = activeRuntime?.status ?? status;
   const sessionError = activeRuntime?.error ?? error;
 
   function setRuntimeDraft(value: string) {
     setDraft(value);
-    if (projectId) {
-      dispatchRuntime({
-        type: "set-draft",
-        projectId,
-        sessionId: activeSessionId,
-        draft: value,
-      });
-    }
+    dispatchRuntime({
+      type: "set-draft",
+      sessionId: activeSessionId,
+      draft: value,
+    });
   }
 
   useEffect(() => {
@@ -180,10 +159,6 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
-
-  useEffect(() => {
-    projectIdRef.current = projectId;
-  }, [projectId]);
 
   useEffect(() => {
     if (!contextMenu && !notificationsOpen) return;
@@ -196,11 +171,9 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   }, [contextMenu, notificationsOpen]);
 
   useEffect(() => {
-    if (!projectId) return;
     for (const session of sessions) {
       dispatchRuntime({
         type: "ensure-session",
-        projectId,
         session: {
           id: session.id,
           title: session.title,
@@ -208,39 +181,29 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         },
       });
     }
-  }, [projectId, sessions]);
+  }, [sessions]);
 
   const handleEvent = useCallback(
-    ({
-      projectId: eventProjectId,
-      sessionId,
-      event,
-      ...identity
-    }: RuntimeEvent) => {
-      if (eventProjectId !== projectIdRef.current) return;
-      const selected = sessionKey(
-        projectIdRef.current ?? "",
-        activeSessionIdRef.current,
-      );
+    ({ sessionId, event, ...identity }: SessionProcessEvent) => {
       dispatchRuntime({
-        type: "runtime-event",
-        active: selected,
-        event: { projectId: eventProjectId, sessionId, event, ...identity },
+        type: "process-event",
+        active: activeSessionIdRef.current,
+        event: { sessionId, event, ...identity },
       });
       const terminalStatus = terminalStatusForEvent(event);
-      const notificationTarget = `${eventProjectId}:${sessionId}`;
-      const notificationKey = `${notificationTarget}:${identity.generation}`;
+      const notificationTarget = sessionId;
+      const notificationKey = `${notificationTarget}:${identity.instanceId}`;
       const notifiedGeneration =
         notifiedGenerations.current.get(notificationTarget);
       if (
         terminalStatus &&
         sessionId !== activeSessionIdRef.current &&
         (notifiedGeneration === undefined ||
-          identity.generation > notifiedGeneration)
+          identity.instanceId > notifiedGeneration)
       ) {
         notifiedGenerations.current.set(
           notificationTarget,
-          identity.generation,
+          identity.instanceId,
         );
         setNotifications((current) => [
           ...current.filter(
@@ -258,8 +221,8 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           },
         ]);
       }
-      // The normalized store retains every target. The presentation list is
-      // updated only for its own project while persisted history is loading.
+      // Runtime state is retained per session while persisted history loads
+      // for the currently visible workspace.
       if (event.type === "bridge_error") {
         if (sessionId === activeSessionIdRef.current)
           setError(
@@ -270,11 +233,8 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         return;
       }
       if (event.type === "agent_start") agentRunObserved.current = true;
-      if (
-        (event.type === "agent_settled" || event.type === "bridge_error") &&
-        eventProjectId === projectIdRef.current
-      ) {
-        startedRuntimes.current.delete(sessionKey(eventProjectId, sessionId));
+      if (event.type === "agent_settled" || event.type === "bridge_error") {
+        startedSessions.current.delete(sessionId);
       }
       const notification = event.message;
       if (
@@ -346,8 +306,6 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         const workspace = await startup.current;
         if (active) {
           setDirectory(workspace.directory);
-          projectIdRef.current = workspace.projectId;
-          setProjectId(workspace.projectId);
           setSessions(workspace.sessions);
           const [nextTags, nextAssignments] = await Promise.all([
             client.listTags(),
@@ -379,15 +337,11 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       setError(undefined);
       setDraft("");
       resetCommandDiscovery();
-      if (projectIdRef.current)
-        dispatchRuntime({
-          type: "remove-workspace",
-          projectId: projectIdRef.current,
-        });
+      startedSessions.current.clear();
+      startingSessions.current.clear();
+      dispatchRuntime({ type: "clear-sessions" });
       const workspace = await initializeWorkspace(client);
       setDirectory(workspace.directory);
-      projectIdRef.current = workspace.projectId;
-      setProjectId(workspace.projectId);
       setSessions(workspace.sessions);
       const [nextTags, nextAssignments] = await Promise.all([
         client.listTags(),
@@ -520,17 +474,16 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         await client.renameTag(renameTarget.tag.id, name);
         setTags(await client.listTags());
       } else {
-        if (!projectId)
-          throw new Error("Select a project before renaming a session");
+        await ensureSessionStarted(
+          renameTarget.session.id,
+          renameTarget.session.sessionPath,
+        );
         assertResponse(
-          await client.sendRpc(
-            activeTarget(projectId, renameTarget.session.id),
-            {
-              id: `rename-session-${requestSequence.current++}`,
-              type: "set_session_name",
-              name,
-            },
-          ),
+          await client.sendRpc(renameTarget.session.id, {
+            id: `rename-session-${requestSequence.current++}`,
+            type: "set_session_name",
+            name,
+          }),
           "rename session",
         );
         updateSession(renameTarget.session.id, setSessions, (session) => ({
@@ -562,8 +515,9 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     const name = newTagName.trim();
     if (!name) return;
     try {
-      await client.createTag(name);
-      setTags(await client.listTags());
+      const tag = await client.createTag(name);
+      setTags((current) => [...current, tag]);
+      setExpandedTags((current) => new Set(current).add(String(tag.id)));
       setNewTagName("");
       setCreatingTag(false);
     } catch (reason) {
@@ -572,55 +526,22 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   }
 
   async function createSession() {
-    if (!isSessionInteractive(activeRuntime) || !activeSession) return;
-    const id = `session-${sessionSequence.current++}`;
+    if (!isSessionInteractive(activeRuntime)) return;
     try {
-      const priorTarget = activeTarget(projectId, activeSessionId);
-      await ensureRuntimeStarted(priorTarget, activeSession.sessionPath);
-      assertResponse(
-        await client.sendRpc(priorTarget, {
-          id,
-          type: "new_session",
-        }),
-        "new session",
-      );
-      const metadata = await getSessionMetadata(
-        client,
-        priorTarget,
-        `${id}-state`,
-      );
-      const stableTarget = await client.bindSession(priorTarget, metadata.id);
-      startedRuntimes.current.delete(
-        sessionKey(priorTarget.projectId, priorTarget.sessionId),
-      );
-      startedRuntimes.current.add(
-        sessionKey(stableTarget.projectId, stableTarget.sessionId),
-      );
-      assertResponse(
-        await client.sendRpc(stableTarget, {
-          id: `name-${id}`,
-          type: "set_session_name",
-          name: metadata.id,
-        }),
-        "name session",
-      );
-      const session = loadedWorkspaceSession({
-        id: metadata.id,
-        title: metadata.id,
-        path: metadata.path,
-      });
+      const persisted = await client.createSession();
+      const session = loadedWorkspaceSession(persisted);
       setSessions((current) => [...current, session]);
       dispatchRuntime({
         type: "ensure-session",
-        projectId: stableTarget.projectId,
         session: {
           id: session.id,
           title: session.title,
           sessionPath: session.sessionPath,
         },
       });
-      activeSessionIdRef.current = metadata.id;
-      setActiveSessionId(metadata.id);
+      startedSessions.current.add(session.id);
+      activeSessionIdRef.current = session.id;
+      setActiveSessionId(session.id);
       setDraft("");
     } catch (reason) {
       fail(setError, setStatus, reason);
@@ -634,17 +555,9 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     if (session.id === activeSessionId) return;
     const previousSessionId = activeSessionId;
     try {
-      if (!projectId)
-        throw new Error("Select a project before selecting sessions");
       activeSessionIdRef.current = session.id;
-      dispatchRuntime({
-        type: "select-session",
-        projectId,
-        sessionId: session.id,
-      });
-      setDraft(
-        runtimeState.sessions[sessionKey(projectId, session.id)]?.draft ?? "",
-      );
+      dispatchRuntime({ type: "select-session", sessionId: session.id });
+      setDraft(runtimeState.sessions[session.id]?.draft ?? "");
       setActiveSessionId(session.id);
       if (session.historyLoaded) return;
       updateSession(session.id, setSessions, (current) => ({
@@ -730,29 +643,24 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       : false;
     setRuntimeDraft("");
     agentRunObserved.current = false;
-    if (projectId) {
-      dispatchRuntime({
-        type: "set-status",
-        projectId,
-        sessionId: activeSession.id,
-        status: "streaming",
-      });
-    }
+    dispatchRuntime({
+      type: "set-status",
+      sessionId: activeSession.id,
+      status: "streaming",
+    });
     try {
-      const target = activeTarget(projectId, activeSession.id);
-      await ensureRuntimeStarted(target, activeSession.sessionPath);
+      await ensureSessionStarted(activeSession.id, activeSession.sessionPath);
       assertResponse(
-        await client.sendRpc(target, {
+        await client.sendRpc(activeSession.id, {
           id: `prompt-${requestSequence.current++}`,
           type: "prompt",
           message,
         }),
         "send prompt",
       );
-      if (extensionCommand && !agentRunObserved.current && projectId) {
+      if (extensionCommand && !agentRunObserved.current) {
         dispatchRuntime({
           type: "set-status",
-          projectId,
           sessionId: activeSession.id,
           status: "idle",
         });
@@ -765,33 +673,24 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           : typeof record?.message === "string"
             ? record.message
             : String(reason);
-      if (projectId) {
-        dispatchRuntime({
-          type: "set-status",
-          projectId,
-          sessionId: activeSession.id,
-          status: "failed",
-          error: message,
-        });
-      }
+      dispatchRuntime({
+        type: "set-status",
+        sessionId: activeSession.id,
+        status: "failed",
+        error: message,
+      });
       setError(message);
     }
   }
 
   async function abort() {
-    if (projectId) {
-      dispatchRuntime({
-        type: "set-status",
-        projectId,
-        sessionId: activeSessionId,
-        status: "aborted",
-      });
-    }
+    dispatchRuntime({
+      type: "set-status",
+      sessionId: activeSessionId,
+      status: "aborted",
+    });
     try {
-      assertResponse(
-        await client.abortAgent(activeTarget(projectId, activeSessionId)),
-        "abort",
-      );
+      assertResponse(await client.abortSession(activeSessionId), "abort");
     } catch (reason) {
       fail(setError, setStatus, reason);
     }
@@ -806,44 +705,40 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
     setShowCommands(false);
   }
 
-  function ensureRuntimeStarted(
-    target: import("./pi-client").RuntimeTarget,
+  function ensureSessionStarted(
+    sessionId: string,
     sessionPath: string,
   ): Promise<void> {
-    const targetKey = sessionKey(target.projectId, target.sessionId);
-    if (startedRuntimes.current.has(targetKey)) return Promise.resolve();
-    const existing = startingRuntimes.current.get(targetKey);
+    if (startedSessions.current.has(sessionId)) return Promise.resolve();
+    const existing = startingSessions.current.get(sessionId);
     if (existing) return existing;
     const start = client
-      .startAgent(target, sessionPath)
+      .startSession(sessionId, sessionPath)
       .catch((reason) => {
-        // The desktop may reconnect after a UI reload while its session child is
-        // still alive. That child is the runtime this target needs, not an error.
         if (!isAlreadyRunningError(reason)) throw reason;
       })
       .then(() => {
-        startedRuntimes.current.add(targetKey);
+        startedSessions.current.add(sessionId);
       })
       .finally(() => {
-        startingRuntimes.current.delete(targetKey);
+        startingSessions.current.delete(sessionId);
       });
-    startingRuntimes.current.set(targetKey, start);
+    startingSessions.current.set(sessionId, start);
     return start;
   }
 
   function loadCommands(): Promise<void> {
     if (commandDiscovery.current) return commandDiscovery.current;
     const generation = commandGeneration.current;
-    if (!projectId || !activeSession)
+    if (!activeSession)
       return Promise.reject(
-        new Error("Select a project and session before loading commands"),
+        new Error("Select a session before loading commands"),
       );
-    const target = activeTarget(projectId, activeSessionId);
-    commandDiscovery.current = ensureRuntimeStarted(
-      target,
+    commandDiscovery.current = ensureSessionStarted(
+      activeSessionId,
       activeSession.sessionPath,
     )
-      .then(() => getCommands(client, target, "get-commands-0"))
+      .then(() => getCommands(client, activeSessionId, "get-commands-0"))
       .then((availableCommands) => {
         if (generation !== commandGeneration.current) return;
         discoveredCommands.current = availableCommands;
@@ -886,7 +781,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
             >
               <NotificationIcon />
               <span className="notification-count">
-                {notifications.filter((item) => !item.read).length || ""}
+                {notifications.filter((item) => !item.read).length}
               </span>
             </button>
             {notificationsOpen && (
@@ -1066,22 +961,12 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                             beginPointerDrag(event, session.id)
                           }
                           onClick={() => void selectSession(session)}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            setContextMenu({
-                              kind: "session",
-                              session,
-                              x: event.clientX,
-                              y: event.clientY,
-                            });
-                          }}
                           type="button"
                         >
                           <StatusIcon
                             status={
-                              runtimeState.sessions[
-                                sessionKey(projectId ?? "", session.id)
-                              ]?.status ?? "idle"
+                              runtimeState.sessions[session.id]?.status ??
+                              "idle"
                             }
                           />
                           <span className="session-copy">
@@ -1106,9 +991,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                             ) : (
                               <strong>{session.title}</strong>
                             )}
-                            {runtimeState.sessions[
-                              sessionKey(projectId ?? "", session.id)
-                            ]?.unread && (
+                            {runtimeState.sessions[session.id]?.unread && (
                               <span
                                 aria-label="Unread updates"
                                 className="session-unread"
@@ -1120,6 +1003,31 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
                             </small>
                           </span>
                         </button>
+                        <div className="session-actions">
+                          <button
+                            aria-label={`Rename session ${session.title}`}
+                            className="rename-session"
+                            onClick={() =>
+                              beginRename({ kind: "session", session })
+                            }
+                            type="button"
+                          >
+                            <svg
+                              aria-hidden="true"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              xmlns="http://www.w3.org/2000/svg"
+                            >
+                              <path
+                                d="m4 16.5-.5 4 4-.5L19 8.5 15.5 5 4 16.5Z"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.7"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     ))}
                 </section>
@@ -1273,30 +1181,23 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
           aria-label={`${contextMenu.kind} actions`}
           className="context-menu"
           role="menu"
+          onPointerDown={(event) => event.stopPropagation()}
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
-            onClick={() =>
-              beginRename(
-                contextMenu.kind === "tag"
-                  ? { kind: "tag", tag: contextMenu.tag }
-                  : { kind: "session", session: contextMenu.session },
-              )
-            }
+            onClick={() => beginRename({ kind: "tag", tag: contextMenu.tag })}
             role="menuitem"
             type="button"
           >
             Rename
           </button>
-          {contextMenu.kind === "tag" && (
-            <button
-              onClick={() => void removeTag(contextMenu.tag)}
-              role="menuitem"
-              type="button"
-            >
-              Remove tag
-            </button>
-          )}
+          <button
+            onClick={() => void removeTag(contextMenu.tag)}
+            role="menuitem"
+            type="button"
+          >
+            Remove tag
+          </button>
         </div>
       )}
     </main>
@@ -1305,10 +1206,13 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
 
 async function getCommands(
   client: PiClient,
-  target: import("./pi-client").RuntimeTarget,
+  sessionId: string,
   id: string,
 ): Promise<PiCommand[]> {
-  const response = await client.sendRpc(target, { id, type: "get_commands" });
+  const response = await client.sendRpc(sessionId, {
+    id,
+    type: "get_commands",
+  });
   assertResponse(response, "get commands");
   const data = asRecord(response.data);
   const commands = data?.commands;
@@ -1340,9 +1244,9 @@ function matchCommands(commands: PiCommand[], draft: string): PiCommand[] {
 
 function isAlreadyRunningError(reason: unknown): boolean {
   return reason instanceof Error
-    ? reason.message.startsWith("Pi runtime is already running")
+    ? reason.message.startsWith("Pi RPC agent is already running")
     : typeof reason === "string" &&
-        reason.startsWith("Pi runtime is already running");
+        reason.startsWith("Pi RPC agent is already running");
 }
 
 function isExtensionCommand(message: string, commands: PiCommand[]): boolean {
@@ -1482,8 +1386,7 @@ async function initializeWorkspace(
   const sessions = (await client.listSessions()).map(workspaceSession);
   const activeSession =
     sessions.find((session) => session.id === "terminal-id") ?? sessions[0];
-  if (!activeSession)
-    return { directory: workspace.path, projectId: workspace.id, sessions };
+  if (!activeSession) return { directory: workspace.path, sessions };
   const loaded = {
     ...activeSession,
     historyLoaded: true,
@@ -1493,7 +1396,6 @@ async function initializeWorkspace(
   return {
     activeSession: loaded,
     directory: workspace.path,
-    projectId: workspace.id,
     sessions: sessions.map((session) =>
       session.id === loaded.id ? loaded : session,
     ),
@@ -1623,25 +1525,6 @@ function emptyWorkspaceSession(session: PersistedSession): WorkspaceSession {
     history: [],
   };
 }
-async function getSessionMetadata(
-  client: PiClient,
-  target: import("./pi-client").RuntimeTarget,
-  id: string,
-): Promise<{ id: string; path: string; name?: string }> {
-  const response = await client.sendRpc(target, { id, type: "get_state" });
-  assertResponse(response, "get session state");
-  const data = asRecord(response.data);
-  if (typeof data?.sessionFile !== "string")
-    throw new Error("Pi did not return an active session file");
-  if (typeof data?.sessionId !== "string")
-    throw new Error("Pi did not return an active session id");
-  return {
-    id: data.sessionId,
-    path: data.sessionFile,
-    name: typeof data.sessionName === "string" ? data.sessionName : undefined,
-  };
-}
-
 async function getHistory(
   client: PiClient,
   sessionPath: string,

@@ -29,9 +29,9 @@ The extension waits for the active agent to settle, then starts the native appli
 
 ### Current workspace, sessions, and tags
 
-`/app` does not take over the terminal's active conversation. Pi App exposes **only one canonical current workspace** at a time: the directory inherited from `/app`, or a directory selected with **Change workspace** beside the Pi App title. Changing workspace replaces the visible session list; it never turns the sidebar into a catalog of other directories and does not implicitly start, stop, or abort an existing runtime.
+`/app` does not take over the terminal's active conversation. Pi App exposes **only one canonical current workspace** at a time: the directory inherited from `/app`, or a directory selected with **Change workspace** beside the Pi App title. Changing workspace replaces the visible session list; it never turns the sidebar into a catalog of other directories and does not implicitly stop or abort active sessions.
 
-Pi owns JSONL session persistence. Pi App reads only the current workspace's persisted conversations and starts a dedicated Pi RPC child only when a session first needs to send work. Sessions may continue in the background while you navigate; their target identity remains internal to route runtime events safely.
+Pi owns JSONL session persistence. Pi App reads only the current workspace's persisted conversations and starts a dedicated Pi RPC child only when a session first needs to send work. Sessions may continue in the background while you navigate; each process is identified by its session ID and instance ID so its events reach only that session.
 
 The sidebar groups sessions by one optional tag, plus the fixed **Uncategorized** group. Tags and assignments are app-private SQLite metadata keyed by canonical workspace path and Pi session ID. A tag name must be non-empty and unique. Removing a tag removes only its metadata assignment, immediately returning its sessions to Uncategorized: Pi App never deletes, migrates, or writes Pi JSONL session files or the legacy `projects.json` catalog.
 
@@ -56,10 +56,10 @@ Pi App launched from `/app` or the terminal inherits that process's current work
 Pi owns session persistence. Pi App calculates Pi's workspace session directory from the selected canonical workspace and passes it only as the documented startup option:
 
 ```text
-pi --mode rpc --session-dir <Pi project session directory>
+pi --mode rpc --session-dir <Pi project session directory> [--session <Pi session JSONL path>]
 ```
 
-A workspace with no existing session directory starts with no sessions; Pi creates the directory and its new session when the RPC process starts. Pi's RPC commands can switch a session, but Pi App does not use that global switch for sidebar navigation. Each active session is addressed by explicit internal workspace/session identity and runs in its workspace cwd.
+A workspace with no existing session directory starts with no sessions; Pi creates the directory and its new session when the RPC process starts. Pi's RPC commands can switch a session, but Pi App does not use that global switch for sidebar navigation. Each active session has its own Pi RPC process, started in the workspace cwd and bound directly to that session.
 
 Finder and Dock do not inherit your terminal's `PATH`. On macOS, Pi App starts that same documented command through the user's zsh login/interactive environment. This makes npm/NVM-installed `pi` and its Node interpreter available; zsh immediately `exec`s Pi, leaving the JSONL RPC stdin/stdout pipes directly connected to Pi. This requires a usable `pi` command in the user's zsh environment.
 

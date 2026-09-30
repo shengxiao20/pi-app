@@ -2,7 +2,7 @@ use tauri::Manager;
 
 pub mod commands;
 pub mod rpc;
-pub mod runtime;
+pub mod session_process;
 pub mod tags;
 pub mod workspace;
 
@@ -14,10 +14,10 @@ pub fn run() {
         .manage(commands::AppState::new(cwd))
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            commands::start_agent,
-            commands::bind_session,
+            commands::start_session,
+            commands::create_session,
             commands::send_rpc,
-            commands::abort_agent,
+            commands::abort_session,
             commands::current_workspace,
             commands::choose_workspace,
             commands::list_sessions,

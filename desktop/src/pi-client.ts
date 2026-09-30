@@ -3,13 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 
 export type RpcRecord = Record<string, unknown>;
 
-export type RuntimeTarget = {
-  projectId: string;
+export type SessionProcessEvent = {
   sessionId: string;
-};
-
-export type RuntimeEvent = RuntimeTarget & {
-  generation: number;
+  instanceId: number;
   event: RpcRecord;
 };
 
@@ -29,15 +25,14 @@ export type Tag = { id: number; name: string };
 export type SessionTagAssignment = { sessionId: string; tagId: number | null };
 
 export interface PiClient {
-  /** Activates a Pi child only for work on this target. An existing session path
-   * makes the backend restore and verify Pi's active session before returning. */
-  startAgent(target: RuntimeTarget, sessionPath?: string): Promise<void>;
-  bindSession(target: RuntimeTarget, sessionId: string): Promise<RuntimeTarget>;
+  /** Starts an independent Pi RPC child already bound to this persisted session. */
+  startSession(sessionId: string, sessionPath: string): Promise<void>;
+  createSession(): Promise<PersistedSession>;
   currentWorkspace(): Promise<CurrentWorkspace | null>;
   chooseWorkspace(): Promise<CurrentWorkspace | null>;
-  sendRpc(target: RuntimeTarget, request: RpcRecord): Promise<RpcRecord>;
-  abortAgent(target: RuntimeTarget): Promise<RpcRecord>;
-  listen(handler: (event: RuntimeEvent) => void): Promise<() => void>;
+  sendRpc(sessionId: string, request: RpcRecord): Promise<RpcRecord>;
+  abortSession(sessionId: string): Promise<RpcRecord>;
+  listen(handler: (event: SessionProcessEvent) => void): Promise<() => void>;
   listSessions(): Promise<PersistedSession[]>;
   listTags(): Promise<Tag[]>;
   createTag(name: string): Promise<Tag>;
@@ -59,14 +54,13 @@ export type PersistedSession = {
 };
 
 export const tauriPiClient: PiClient = {
-  startAgent: (target, sessionPath) =>
-    invoke("start_agent", { target, sessionPath }),
-  bindSession: (target, sessionId) =>
-    invoke<RuntimeTarget>("bind_session", { target, sessionId }),
+  startSession: (sessionId, sessionPath) =>
+    invoke("start_session", { sessionId, sessionPath }),
+  createSession: () => invoke("create_session"),
   currentWorkspace: () => invoke<CurrentWorkspace | null>("current_workspace"),
   chooseWorkspace: () => invoke<CurrentWorkspace | null>("choose_workspace"),
-  sendRpc: (target, request) => invoke("send_rpc", { target, request }),
-  abortAgent: (target) => invoke("abort_agent", { target }),
+  sendRpc: (sessionId, request) => invoke("send_rpc", { sessionId, request }),
+  abortSession: (sessionId) => invoke("abort_session", { sessionId }),
   listSessions: () => invoke("list_sessions"),
   listTags: () => invoke("list_tags"),
   createTag: (name) => invoke("create_tag", { name }),
@@ -78,5 +72,7 @@ export const tauriPiClient: PiClient = {
   sessionHistory: (sessionPath, before, limit) =>
     invoke("session_history", { sessionPath, before, limit }),
   listen: async (handler) =>
-    listen<RuntimeEvent>("pi-rpc-event", ({ payload }) => handler(payload)),
+    listen<SessionProcessEvent>("pi-rpc-event", ({ payload }) =>
+      handler(payload),
+    ),
 };

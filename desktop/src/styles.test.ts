@@ -35,6 +35,12 @@ describe("desktop layout", () => {
     expect(styles).toMatch(/\.new-tag-form\s*\{[^}]*display:\s*flex/s);
   });
 
+  it("matches session inline rename typography to the session title", () => {
+    expect(styles).toMatch(
+      /\.session-copy \.inline-rename\s*\{[^}]*align-self:\s*center[^}]*font-size:\s*13px[^}]*font-weight:\s*700[^}]*line-height:\s*16px/s,
+    );
+  });
+
   it("styles the rename control as an icon button", () => {
     expect(styles).toMatch(/\.rename-session\s*\{[^}]*height:\s*25px/s);
     expect(styles).toMatch(/\.rename-session svg\s*\{[^}]*width:\s*14px/s);

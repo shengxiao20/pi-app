@@ -3,307 +3,104 @@ import { describe, expect, it } from "vitest";
 import {
   createWorkspaceState,
   isSessionInteractive,
-  projectRuntimeSummary,
-  sessionKey,
   workspaceReducer,
 } from "./workspace-state";
 
+function session(id: string) {
+  return { id, title: id, sessionPath: `/${id}.jsonl` };
+}
+
+function event(sessionId: string, instanceId: number, type: string) {
+  return { sessionId, instanceId, event: { type } };
+}
+
 describe("workspaceReducer", () => {
-  it("keeps project/session state isolated while routing an envelope", () => {
-    const first = sessionKey("project-a", "session-1");
-    const second = sessionKey("project-b", "session-2");
+  it("keeps runtime state isolated by session", () => {
     let state = createWorkspaceState();
     state = workspaceReducer(state, {
       type: "ensure-session",
-      projectId: "project-a",
-      session: { id: "session-1", title: "One", sessionPath: "/a/one" },
+      session: session("a"),
     });
     state = workspaceReducer(state, {
       type: "ensure-session",
-      projectId: "project-b",
-      session: { id: "session-2", title: "Two", sessionPath: "/b/two" },
+      session: session("b"),
     });
     state = workspaceReducer(state, {
-      type: "runtime-event",
-      active: first,
-      event: {
-        projectId: "project-b",
-        sessionId: "session-2",
-        generation: 3,
-        event: { type: "message_update", text: "background" },
-      },
+      type: "process-event",
+      active: "b",
+      event: event("a", 1, "message_update"),
     });
 
-    expect(state.sessions[first].history).toEqual([]);
-    expect(state.sessions[second]).toMatchObject({
-      generation: 3,
-      unread: true,
-      history: [{ kind: "message", role: "assistant", text: "background" }],
-    });
+    expect(state.sessions.a.status).toBe("streaming");
+    expect(state.sessions.a.unread).toBe(true);
+    expect(state.sessions.b.status).toBe("idle");
   });
 
-  it("keeps drafts local and clears unread only when that session is selected", () => {
-    const one = sessionKey("project", "one");
-    const two = sessionKey("project", "two");
-    let state = createWorkspaceState();
-    for (const session of [
-      { id: "one", title: "One", sessionPath: "/one" },
-      { id: "two", title: "Two", sessionPath: "/two" },
-    ]) {
-      state = workspaceReducer(state, {
-        type: "ensure-session",
-        projectId: "project",
-        session,
-      });
-    }
-    state = workspaceReducer(state, {
-      type: "set-draft",
-      projectId: "project",
-      sessionId: "one",
-      draft: "keep me",
-    });
-    state = workspaceReducer(state, {
-      type: "runtime-event",
-      active: one,
-      event: {
-        projectId: "project",
-        sessionId: "two",
-        generation: 1,
-        event: { type: "agent_settled" },
-      },
-    });
-    state = workspaceReducer(state, {
-      type: "select-session",
-      projectId: "project",
-      sessionId: "two",
-    });
-
-    expect(state.sessions[one].draft).toBe("keep me");
-    expect(state.sessions[two].unread).toBe(false);
-  });
-
-  it("returns a completed session to idle when it is selected", () => {
-    const key = sessionKey("project", "session");
+  it("ignores stale events from an older process instance", () => {
     let state = createWorkspaceState();
     state = workspaceReducer(state, {
       type: "ensure-session",
-      projectId: "project",
-      session: { id: "session", title: "Session", sessionPath: "/session" },
+      session: session("a"),
+    });
+    state = workspaceReducer(state, {
+      type: "process-event",
+      active: "a",
+      event: event("a", 2, "agent_settled"),
+    });
+    state = workspaceReducer(state, {
+      type: "process-event",
+      active: "a",
+      event: event("a", 1, "message_update"),
+    });
+
+    expect(state.sessions.a.status).toBe("completed");
+    expect(state.sessions.a.instanceId).toBe(2);
+  });
+
+  it("selecting a completed session clears unread and returns it to idle", () => {
+    let state = createWorkspaceState();
+    state = workspaceReducer(state, {
+      type: "ensure-session",
+      session: session("a"),
+    });
+    state = workspaceReducer(state, {
+      type: "process-event",
+      active: "b",
+      event: event("a", 1, "agent_settled"),
+    });
+    state = workspaceReducer(state, { type: "select-session", sessionId: "a" });
+
+    expect(state.sessions.a).toMatchObject({ status: "idle", unread: false });
+  });
+
+  it("blocks prompts only for the session that is streaming", () => {
+    let state = createWorkspaceState();
+    state = workspaceReducer(state, {
+      type: "ensure-session",
+      session: session("a"),
+    });
+    state = workspaceReducer(state, {
+      type: "ensure-session",
+      session: session("b"),
     });
     state = workspaceReducer(state, {
       type: "set-status",
-      projectId: "project",
-      sessionId: "session",
-      status: "completed",
-    });
-    state = workspaceReducer(state, {
-      type: "select-session",
-      projectId: "project",
-      sessionId: "session",
-    });
-
-    expect(state.sessions[key]).toMatchObject({
-      status: "idle",
-      unread: false,
-    });
-  });
-
-  it("ignores an event from an older generation without affecting interactivity", () => {
-    const key = sessionKey("project", "session");
-    let state = createWorkspaceState();
-    state = workspaceReducer(state, {
-      type: "ensure-session",
-      projectId: "project",
-      session: { id: "session", title: "Session", sessionPath: "/session" },
-    });
-    state = workspaceReducer(state, {
-      type: "runtime-event",
-      active: key,
-      event: {
-        projectId: "project",
-        sessionId: "session",
-        generation: 2,
-        event: { type: "bridge_error", message: "new failure" },
-      },
-    });
-    state = workspaceReducer(state, {
-      type: "runtime-event",
-      active: key,
-      event: {
-        projectId: "project",
-        sessionId: "session",
-        generation: 1,
-        event: { type: "agent_start" },
-      },
-    });
-
-    expect(state.sessions[key]).toMatchObject({
-      generation: 2,
-      status: "failed",
-      error: "new failure",
-    });
-    expect(isSessionInteractive(state.sessions[key])).toBe(true);
-  });
-
-  it("retains background tool lifecycle and derives terminal/project state", () => {
-    const key = sessionKey("project", "session");
-    let state = createWorkspaceState();
-    state = workspaceReducer(state, {
-      type: "ensure-session",
-      projectId: "project",
-      session: { id: "session", title: "Session", sessionPath: "/session" },
-    });
-    state = workspaceReducer(state, {
-      type: "runtime-event",
-      event: {
-        projectId: "project",
-        sessionId: "session",
-        generation: 1,
-        event: {
-          type: "tool_execution_start",
-          toolCallId: "tool-1",
-          toolName: "bash",
-        },
-      },
-    });
-    state = workspaceReducer(state, {
-      type: "runtime-event",
-      event: {
-        projectId: "project",
-        sessionId: "session",
-        generation: 1,
-        event: {
-          type: "tool_execution_end",
-          toolCallId: "tool-1",
-          output: "done",
-        },
-      },
-    });
-    state = workspaceReducer(state, {
-      type: "runtime-event",
-      event: {
-        projectId: "project",
-        sessionId: "session",
-        generation: 1,
-        event: { type: "agent_settled" },
-      },
-    });
-
-    expect(state.sessions[key]).toMatchObject({
-      status: "completed",
-      tools: [{ id: "tool-1", name: "bash", output: "done", isRunning: false }],
-    });
-  });
-
-  it("preserves abort intent and only flags unread for visible background work", () => {
-    const key = sessionKey("project", "session");
-    let state = createWorkspaceState();
-    state = workspaceReducer(state, {
-      type: "ensure-session",
-      projectId: "project",
-      session: { id: "session", title: "Session", sessionPath: "/session" },
-    });
-    state = workspaceReducer(state, {
-      type: "set-status",
-      projectId: "project",
-      sessionId: "session",
-      status: "aborted",
-    });
-    state = workspaceReducer(state, {
-      type: "runtime-event",
-      active: key,
-      event: {
-        projectId: "project",
-        sessionId: "session",
-        generation: 1,
-        event: { type: "agent_settled" },
-      },
-    });
-    expect(state.sessions[key].status).toBe("aborted");
-    expect(state.sessions[key].unread).toBe(false);
-  });
-
-  it("derives project running and unread summary from its own sessions", () => {
-    let state = createWorkspaceState();
-    for (const [projectId, sessionId] of [
-      ["project-a", "one"],
-      ["project-b", "two"],
-    ]) {
-      state = workspaceReducer(state, {
-        type: "ensure-session",
-        projectId,
-        session: {
-          id: sessionId,
-          title: sessionId,
-          sessionPath: `/${sessionId}`,
-        },
-      });
-    }
-    state = workspaceReducer(state, {
-      type: "runtime-event",
-      event: {
-        projectId: "project-b",
-        sessionId: "two",
-        generation: 1,
-        event: { type: "message_update", text: "background" },
-      },
-    });
-
-    expect(projectRuntimeSummary(state, "project-a")).toEqual({
-      running: false,
-      unread: false,
-    });
-    expect(projectRuntimeSummary(state, "project-b")).toEqual({
-      running: true,
-      unread: true,
-    });
-  });
-
-  it("removes stale workspace sessions before a replacement workspace is shown", () => {
-    const current = sessionKey("workspace-a", "same-session");
-    const other = sessionKey("workspace-b", "same-session");
-    let state = createWorkspaceState();
-    for (const projectId of ["workspace-a", "workspace-b"]) {
-      state = workspaceReducer(state, {
-        type: "ensure-session",
-        projectId,
-        session: {
-          id: "same-session",
-          title: projectId,
-          sessionPath: `/${projectId}`,
-        },
-      });
-    }
-    state = workspaceReducer(state, {
-      type: "remove-workspace",
-      projectId: "workspace-a",
-    });
-    expect(state.sessions[current]).toBeUndefined();
-    expect(state.sessions[other]).toBeDefined();
-  });
-
-  it("leaves an idle session interactive while another session streams", () => {
-    const first = sessionKey("project", "first");
-    const second = sessionKey("project", "second");
-    let state = createWorkspaceState();
-    for (const session of [
-      { id: "first", title: "First", sessionPath: "/first" },
-      { id: "second", title: "Second", sessionPath: "/second" },
-    ]) {
-      state = workspaceReducer(state, {
-        type: "ensure-session",
-        projectId: "project",
-        session,
-      });
-    }
-    state = workspaceReducer(state, {
-      type: "set-status",
-      projectId: "project",
-      sessionId: "first",
+      sessionId: "a",
       status: "streaming",
     });
 
-    expect(isSessionInteractive(state.sessions[first])).toBe(false);
-    expect(isSessionInteractive(state.sessions[second])).toBe(true);
+    expect(isSessionInteractive(state.sessions.a)).toBe(false);
+    expect(isSessionInteractive(state.sessions.b)).toBe(true);
+  });
+
+  it("clears state when the visible workspace changes", () => {
+    let state = createWorkspaceState();
+    state = workspaceReducer(state, {
+      type: "ensure-session",
+      session: session("a"),
+    });
+    expect(workspaceReducer(state, { type: "clear-sessions" })).toEqual({
+      sessions: {},
+    });
   });
 });

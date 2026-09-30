@@ -448,6 +448,14 @@ textarea:focus-visible {
   font-weight: 700;
 }
 
+.session-copy .inline-rename {
+  align-self: center;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
 .session-copy small {
   color: #6d737a;
   font-family: "SFMono-Regular", Consolas, monospace;

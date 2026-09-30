@@ -54,8 +54,8 @@ impl From<SupervisorError> for BridgeError {
 
 impl AgentBridge {
     /// Creates a bridge for the Pi executable in the desktop process environment.
-    pub fn pi(session_dir: &Path) -> Self {
-        let (command, arguments) = pi_command(session_dir);
+    pub fn pi(session_dir: &Path, session_path: Option<&Path>) -> Self {
+        let (command, arguments) = pi_command(session_dir, session_path);
         Self::new(command, arguments)
     }
 
@@ -134,29 +134,34 @@ impl AgentBridge {
 /// PATH for both `pi` and its Node interpreter. `exec` keeps Pi's JSONL stdin/stdout
 /// directly connected to the supervisor after shell initialization.
 #[cfg(target_os = "macos")]
-fn pi_command(session_dir: &Path) -> (OsString, Vec<OsString>) {
-    (
-        OsString::from("/bin/zsh"),
-        vec![
-            OsString::from("-ilc"),
-            OsString::from("exec pi --mode rpc --session-dir \"$1\""),
-            OsString::from("pi-app-rpc"),
-            session_dir.as_os_str().to_owned(),
-        ],
-    )
+fn pi_command(session_dir: &Path, session_path: Option<&Path>) -> (OsString, Vec<OsString>) {
+    let mut arguments = vec![
+        OsString::from("-ilc"),
+        OsString::from("if [ -n \"$2\" ]; then exec pi --mode rpc --session-dir \"$1\" --session \"$2\"; else exec pi --mode rpc --session-dir \"$1\"; fi"),
+        OsString::from("pi-app-rpc"),
+        session_dir.as_os_str().to_owned(),
+    ];
+    if let Some(session_path) = session_path {
+        arguments.push(session_path.as_os_str().to_owned());
+    }
+    (OsString::from("/bin/zsh"), arguments)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn pi_command(session_dir: &Path) -> (OsString, Vec<OsString>) {
-    (
-        OsString::from("pi"),
-        vec![
-            OsString::from("--mode"),
-            OsString::from("rpc"),
-            OsString::from("--session-dir"),
-            session_dir.as_os_str().to_owned(),
-        ],
-    )
+fn pi_command(session_dir: &Path, session_path: Option<&Path>) -> (OsString, Vec<OsString>) {
+    let mut arguments = vec![
+        OsString::from("--mode"),
+        OsString::from("rpc"),
+        OsString::from("--session-dir"),
+        session_dir.as_os_str().to_owned(),
+    ];
+    if let Some(session_path) = session_path {
+        arguments.extend([
+            OsString::from("--session"),
+            session_path.as_os_str().to_owned(),
+        ]);
+    }
+    (OsString::from("pi"), arguments)
 }
 
 fn forward_events(
@@ -199,16 +204,18 @@ mod tests {
     #[test]
     fn starts_pi_through_the_users_zsh_environment_on_macos() {
         let session_dir = Path::new("/tmp/pi app/sessions");
-        let (command, arguments) = pi_command(session_dir);
+        let session_path = Path::new("/tmp/pi app/sessions/session.jsonl");
+        let (command, arguments) = pi_command(session_dir, Some(session_path));
 
         assert_eq!(command, "/bin/zsh");
         assert_eq!(
             arguments,
             [
                 OsString::from("-ilc"),
-                OsString::from("exec pi --mode rpc --session-dir \"$1\""),
+                OsString::from("if [ -n \"$2\" ]; then exec pi --mode rpc --session-dir \"$1\" --session \"$2\"; else exec pi --mode rpc --session-dir \"$1\"; fi"),
                 OsString::from("pi-app-rpc"),
                 OsString::from("/tmp/pi app/sessions"),
+                OsString::from("/tmp/pi app/sessions/session.jsonl"),
             ]
         );
     }
