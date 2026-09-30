@@ -317,11 +317,13 @@ describe("App workspace boundary", () => {
 
     await act(async () => {
       fake.emit({
+        workspaceId: "workspace-a",
         sessionId: "b-session",
         instanceId: 2,
         event: { type: "agent_settled" },
       });
       fake.emit({
+        workspaceId: "workspace-a",
         sessionId: "b-session",
         instanceId: 1,
         event: { type: "agent_settled" },
@@ -361,5 +363,15 @@ describe("App workspace boundary", () => {
     expect(
       screen.queryByRole("button", { name: "Session B: completed" }),
     ).toBeNull();
+
+    await act(async () => {
+      fake.emit({
+        workspaceId: "workspace-a",
+        sessionId: "a-session",
+        instanceId: 3,
+        event: { type: "message_update" },
+      });
+    });
+    expect(screen.queryByText("Session A")).toBeNull();
   });
 });

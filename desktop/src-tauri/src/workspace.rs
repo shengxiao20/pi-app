@@ -107,6 +107,21 @@ impl WorkspaceStore {
         Ok(sessions)
     }
 
+    /// Resolves a renderer-provided persisted session only when it belongs to
+    /// this workspace and its header identifies the requested session.
+    pub fn validate_session(
+        &self,
+        session_id: &str,
+        session_path: PathBuf,
+    ) -> Result<PathBuf, WorkspaceError> {
+        let canonical_path = fs::canonicalize(&session_path)?;
+        let session = self.read_session(session_path.clone())?;
+        if session.id != session_id {
+            return Err(WorkspaceError::InvalidSession(canonical_path));
+        }
+        Ok(canonical_path)
+    }
+
     pub fn session_history(
         &self,
         session_path: PathBuf,
@@ -307,6 +322,30 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_session_with_a_mismatched_requested_id() {
+        let root = temporary_root();
+        let cwd = root.join("project");
+        let sessions = root.join("sessions");
+        fs::create_dir_all(&cwd).unwrap();
+        fs::create_dir_all(&sessions).unwrap();
+        let session = sessions.join("session.jsonl");
+        fs::write(
+            &session,
+            format!(
+                "{{\"type\":\"session\",\"id\":\"actual\",\"cwd\":\"{}\"}}\n",
+                cwd.display()
+            ),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            WorkspaceStore::new(cwd, sessions).validate_session("requested", session),
+            Err(super::WorkspaceError::InvalidSession(_))
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn refuses_history_from_another_project_session_root() {
         let root = temporary_root();
         let first_cwd = root.join("first-project");
@@ -328,11 +367,40 @@ mod tests {
         .unwrap();
 
         let error = WorkspaceStore::new(first_cwd, first_sessions)
-            .session_history(second_session.clone(), None, 80)
+            .validate_session("second", second_session.clone())
             .unwrap_err();
         assert!(matches!(
             error,
             super::WorkspaceError::SessionOutsideCurrentProject(path) if path == second_session
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_session_symlink_that_escapes_the_session_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = temporary_root();
+        let cwd = root.join("project");
+        let sessions = root.join("sessions");
+        let outside = root.join("outside.jsonl");
+        fs::create_dir_all(&cwd).unwrap();
+        fs::create_dir_all(&sessions).unwrap();
+        fs::write(
+            &outside,
+            format!(
+                "{{\"type\":\"session\",\"id\":\"outside\",\"cwd\":\"{}\"}}\n",
+                cwd.display()
+            ),
+        )
+        .unwrap();
+        let escaped = sessions.join("escaped.jsonl");
+        symlink(&outside, &escaped).unwrap();
+
+        assert!(matches!(
+            WorkspaceStore::new(cwd, sessions).validate_session("outside", escaped),
+            Err(super::WorkspaceError::SessionOutsideCurrentProject(_))
         ));
         fs::remove_dir_all(root).unwrap();
     }

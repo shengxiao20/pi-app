@@ -60,6 +60,7 @@ type WorkspaceSession = {
   history: HistoryEntry[];
 };
 type WorkspaceInitialization = {
+  id: string;
   activeSession?: WorkspaceSession;
   directory: string;
   sessions: WorkspaceSession[];
@@ -126,6 +127,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   const [directory, setDirectory] = useState("");
   const [activeSessionId, setActiveSessionId] = useState(INITIAL_SESSION_ID);
   const activeSessionIdRef = useRef(INITIAL_SESSION_ID);
+  const workspaceIdRef = useRef<string | undefined>(undefined);
   const sessionsRef = useRef<WorkspaceSession[]>([]);
   const requestSequence = useRef(0);
   const agentRunObserved = useRef(false);
@@ -184,11 +186,12 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
   }, [sessions]);
 
   const handleEvent = useCallback(
-    ({ sessionId, event, ...identity }: SessionProcessEvent) => {
+    ({ workspaceId, sessionId, event, ...identity }: SessionProcessEvent) => {
+      if (workspaceId !== workspaceIdRef.current) return;
       dispatchRuntime({
         type: "process-event",
         active: activeSessionIdRef.current,
-        event: { sessionId, event, ...identity },
+        event: { workspaceId, sessionId, event, ...identity },
       });
       const terminalStatus = terminalStatusForEvent(event);
       const notificationTarget = sessionId;
@@ -305,6 +308,7 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
         startup.current ??= initializeWorkspace(client);
         const workspace = await startup.current;
         if (active) {
+          workspaceIdRef.current = workspace.id;
           setDirectory(workspace.directory);
           setSessions(workspace.sessions);
           const [nextTags, nextAssignments] = await Promise.all([
@@ -340,7 +344,9 @@ export default function App({ client = tauriPiClient }: { client?: PiClient }) {
       startedSessions.current.clear();
       startingSessions.current.clear();
       dispatchRuntime({ type: "clear-sessions" });
+      workspaceIdRef.current = undefined;
       const workspace = await initializeWorkspace(client);
+      workspaceIdRef.current = workspace.id;
       setDirectory(workspace.directory);
       setSessions(workspace.sessions);
       const [nextTags, nextAssignments] = await Promise.all([
@@ -1386,7 +1392,8 @@ async function initializeWorkspace(
   const sessions = (await client.listSessions()).map(workspaceSession);
   const activeSession =
     sessions.find((session) => session.id === "terminal-id") ?? sessions[0];
-  if (!activeSession) return { directory: workspace.path, sessions };
+  if (!activeSession)
+    return { id: workspace.id, directory: workspace.path, sessions };
   const loaded = {
     ...activeSession,
     historyLoaded: true,
@@ -1394,6 +1401,7 @@ async function initializeWorkspace(
     ...(await getHistory(client, activeSession.sessionPath)),
   };
   return {
+    id: workspace.id,
     activeSession: loaded,
     directory: workspace.path,
     sessions: sessions.map((session) =>

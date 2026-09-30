@@ -101,16 +101,10 @@ export function workspaceReducer(
   if (action.type === "clear-sessions") return createWorkspaceState();
 
   const { sessionId, instanceId, event } = action.event;
-  const current = state.sessions[sessionId] ?? {
-    id: sessionId,
-    title: sessionId,
-    sessionPath: "",
-    history: [],
-    tools: [],
-    draft: "",
-    status: "idle" as SessionStatus,
-    unread: false,
-  };
+  const current = state.sessions[sessionId];
+  // Runtime events cannot introduce sessions: a delayed process from a
+  // previous workspace must not repopulate state after the workspace resets.
+  if (!current) return state;
   if (current.instanceId !== undefined && instanceId < current.instanceId)
     return state;
   const next: WorkspaceSession = {

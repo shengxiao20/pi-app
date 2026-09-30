@@ -170,6 +170,10 @@ pub async fn choose_workspace(
         return Ok(None);
     };
     let workspace = CurrentWorkspace::new(path)?;
+    let shutdown_errors = state.processes.shutdown_all().await;
+    if let Some(error) = shutdown_errors.into_iter().next() {
+        return Err(error.into());
+    }
     *state.selected_directory.lock().await = Some(workspace.path.clone());
     Ok(Some(workspace))
 }
@@ -254,6 +258,10 @@ pub async fn start_session(
     session_path: PathBuf,
 ) -> Result<(), CommandError> {
     let workspace = state.workspace().await?;
+    let session_path = state
+        .workspace_store()
+        .await?
+        .validate_session(&session_id, session_path)?;
     let process = state
         .processes
         .start(
@@ -263,7 +271,13 @@ pub async fn start_session(
             &workspace.path,
         )
         .await?;
-    start_event_forwarder(app, state.processes.clone(), session_id, process);
+    start_event_forwarder(
+        app,
+        state.processes.clone(),
+        workspace.id,
+        session_id,
+        process,
+    );
     Ok(())
 }
 
@@ -279,40 +293,53 @@ pub async fn create_session(
         &default_session_directory(&workspace.path),
         None,
     ));
-    bridge.start_agent(&workspace.path).await?;
-    bridge
-        .send_rpc(serde_json::json!({ "id": "create-session", "type": "new_session" }))
-        .await?;
-    let response = bridge
-        .send_rpc(serde_json::json!({ "id": "create-session-state", "type": "get_state" }))
-        .await?;
-    let metadata = response
-        .get("data")
-        .and_then(Value::as_object)
-        .ok_or_else(|| CommandError {
-            message: "Pi did not return the new session state.".into(),
-        })?;
-    let id = metadata
-        .get("sessionId")
-        .and_then(Value::as_str)
-        .ok_or_else(|| CommandError {
-            message: "Pi did not return a new session id.".into(),
-        })?
-        .to_owned();
-    let path = metadata
-        .get("sessionFile")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .ok_or_else(|| CommandError {
-            message: "Pi did not return a new session file.".into(),
-        })?;
-    let process = state.processes.register(id.clone(), bridge).await?;
-    start_event_forwarder(app, state.processes.clone(), id.clone(), process);
-    Ok(PersistedSession {
-        id: id.clone(),
-        path,
-        title: id,
-    })
+    let result = async {
+        bridge.start_agent(&workspace.path).await?;
+        bridge
+            .send_rpc(serde_json::json!({ "id": "create-session", "type": "new_session" }))
+            .await?;
+        let response = bridge
+            .send_rpc(serde_json::json!({ "id": "create-session-state", "type": "get_state" }))
+            .await?;
+        let metadata = response
+            .get("data")
+            .and_then(Value::as_object)
+            .ok_or_else(|| CommandError {
+                message: "Pi did not return the new session state.".into(),
+            })?;
+        let id = metadata
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| CommandError {
+                message: "Pi did not return a new session id.".into(),
+            })?
+            .to_owned();
+        let path = metadata
+            .get("sessionFile")
+            .and_then(Value::as_str)
+            .map(PathBuf::from)
+            .ok_or_else(|| CommandError {
+                message: "Pi did not return a new session file.".into(),
+            })?;
+        let process = state.processes.register(id.clone(), bridge.clone()).await?;
+        start_event_forwarder(
+            app,
+            state.processes.clone(),
+            workspace.id,
+            id.clone(),
+            process,
+        );
+        Ok(PersistedSession {
+            id: id.clone(),
+            path,
+            title: id,
+        })
+    }
+    .await;
+    if result.is_err() {
+        let _ = bridge.stop_agent().await;
+    }
+    result
 }
 
 #[tauri::command]
@@ -347,6 +374,7 @@ pub async fn abort_session(
 fn start_event_forwarder(
     app: AppHandle,
     processes: Arc<SessionProcessManager>,
+    workspace_id: String,
     session_id: String,
     process: SessionProcess,
 ) {
@@ -360,6 +388,7 @@ fn start_event_forwarder(
             app.emit(
                 rpc_event_name(),
                 SessionProcessEvent {
+                    workspace_id: workspace_id.clone(),
                     session_id: session_id.clone(),
                     instance_id: process.instance_id,
                     event,

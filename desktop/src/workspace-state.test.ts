@@ -11,7 +11,7 @@ function session(id: string) {
 }
 
 function event(sessionId: string, instanceId: number, type: string) {
-  return { sessionId, instanceId, event: { type } };
+  return { workspaceId: "workspace-a", sessionId, instanceId, event: { type } };
 }
 
 describe("workspaceReducer", () => {
@@ -34,6 +34,15 @@ describe("workspaceReducer", () => {
     expect(state.sessions.a.status).toBe("streaming");
     expect(state.sessions.a.unread).toBe(true);
     expect(state.sessions.b.status).toBe("idle");
+  });
+
+  it("ignores an event for a session that has not been registered", () => {
+    const state = workspaceReducer(createWorkspaceState(), {
+      type: "process-event",
+      event: event("old-workspace-session", 1, "message_update"),
+    });
+
+    expect(state).toEqual(createWorkspaceState());
   });
 
   it("ignores stale events from an older process instance", () => {

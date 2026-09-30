@@ -16,6 +16,7 @@ use crate::rpc::bridge::{AgentBridge, BridgeError};
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionProcessEvent {
+    pub workspace_id: String,
     pub session_id: String,
     pub instance_id: u64,
     pub event: Value,

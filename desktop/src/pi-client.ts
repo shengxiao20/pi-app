@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 export type RpcRecord = Record<string, unknown>;
 
 export type SessionProcessEvent = {
+  workspaceId: string;
   sessionId: string;
   instanceId: number;
   event: RpcRecord;
