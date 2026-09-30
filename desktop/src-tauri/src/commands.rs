@@ -12,16 +12,15 @@ use tokio::sync::Mutex;
 
 use crate::{
     rpc::bridge::{rpc_event_name, AgentBridge, BridgeError},
-    runtime::{RuntimeBridge, RuntimeError, RuntimeEvent, RuntimeRegistry, RuntimeTarget},
+    session_process::{SessionProcess, SessionProcessEvent, SessionProcessManager},
     tags::{SessionTagAssignment, Tag, TagError, TagStore},
     workspace::{PersistedHistoryPage, PersistedSession, WorkspaceError, WorkspaceStore},
 };
 
-/// App state owns exactly one canonical workspace and independent session
-/// processes. Its opaque identity preserves runtime isolation without exposing a
-/// user-manageable Project catalog.
+/// The app has one visible workspace. Each active Pi session owns a separate
+/// RPC child process, allowing one session to stream without blocking another.
 pub struct AppState {
-    runtimes: Arc<RuntimeRegistry<AgentBridge>>,
+    processes: Arc<SessionProcessManager>,
     selected_directory: Mutex<Option<PathBuf>>,
 }
 
@@ -34,15 +33,13 @@ impl AppState {
         )
     }
 
-    /// Drains all session children before exit. Kept separate from Tauri's
-    /// callback so lifecycle behavior has a direct, deterministic test seam.
-    pub async fn shutdown_all(&self) -> Vec<RuntimeError> {
-        self.runtimes.shutdown_all().await
+    pub async fn shutdown_all(&self) -> Vec<BridgeError> {
+        self.processes.shutdown_all().await
     }
 
     fn with_inherited_cwd(inherited_cwd: Option<PathBuf>) -> Self {
         Self {
-            runtimes: Arc::new(RuntimeRegistry::new()),
+            processes: Arc::new(SessionProcessManager::new()),
             selected_directory: Mutex::new(inherited_cwd),
         }
     }
@@ -73,19 +70,6 @@ impl AppState {
             message: format!("Cannot create app data directory: {error}"),
         })?;
         TagStore::open(app_data.join("tags.sqlite")).map_err(Into::into)
-    }
-
-    async fn validate_target(
-        &self,
-        target: &RuntimeTarget,
-    ) -> Result<CurrentWorkspace, CommandError> {
-        let workspace = self.workspace().await?;
-        if target.project_id != workspace.id {
-            return Err(CommandError {
-                message: "Runtime target is outside the current workspace.".into(),
-            });
-        }
-        Ok(workspace)
     }
 }
 
@@ -151,15 +135,6 @@ impl From<BridgeError> for CommandError {
         }
     }
 }
-
-impl From<RuntimeError> for CommandError {
-    fn from(error: RuntimeError) -> Self {
-        Self {
-            message: error.to_string(),
-        }
-    }
-}
-
 impl From<WorkspaceError> for CommandError {
     fn from(error: WorkspaceError) -> Self {
         Self {
@@ -167,7 +142,6 @@ impl From<WorkspaceError> for CommandError {
         }
     }
 }
-
 impl From<TagError> for CommandError {
     fn from(error: TagError) -> Self {
         Self {
@@ -184,8 +158,7 @@ pub async fn current_workspace(
     directory.map(CurrentWorkspace::new).transpose()
 }
 
-/// Opens the native folder picker and atomically replaces the sole workspace.
-/// Canceling leaves the current workspace intact.
+/// Opens the native folder picker and replaces the sole visible workspace.
 #[tauri::command]
 pub async fn choose_workspace(
     state: State<'_, AppState>,
@@ -230,28 +203,24 @@ pub async fn session_history(
 pub async fn list_tags(app: AppHandle) -> Result<Vec<Tag>, CommandError> {
     AppState::tag_store(&app)?.list_tags().map_err(Into::into)
 }
-
 #[tauri::command]
 pub async fn create_tag(app: AppHandle, name: String) -> Result<Tag, CommandError> {
     AppState::tag_store(&app)?
         .create_tag(&name)
         .map_err(Into::into)
 }
-
 #[tauri::command]
 pub async fn rename_tag(app: AppHandle, id: i64, name: String) -> Result<Tag, CommandError> {
     AppState::tag_store(&app)?
         .rename_tag(id, &name)
         .map_err(Into::into)
 }
-
 #[tauri::command]
 pub async fn delete_tag(app: AppHandle, id: i64) -> Result<(), CommandError> {
     AppState::tag_store(&app)?
         .delete_tag(id)
         .map_err(Into::into)
 }
-
 #[tauri::command]
 pub async fn list_session_tag_assignments(
     app: AppHandle,
@@ -262,7 +231,6 @@ pub async fn list_session_tag_assignments(
         .assignments(&workspace.path)
         .map_err(Into::into)
 }
-
 #[tauri::command]
 pub async fn assign_session_tag(
     app: AppHandle,
@@ -276,220 +244,145 @@ pub async fn assign_session_tag(
         .map_err(Into::into)
 }
 
+/// Starts the dedicated Pi process for one persisted session. Pi opens the
+/// session itself through `--session`; no global `switch_session` is used.
 #[tauri::command]
-pub async fn start_agent(
+pub async fn start_session(
     app: AppHandle,
     state: State<'_, AppState>,
-    target: RuntimeTarget,
-    session_path: Option<PathBuf>,
-) -> Result<(), CommandError> {
-    let workspace = state.validate_target(&target).await?;
-    let bridge = Arc::new(AgentBridge::pi(&default_session_directory(&workspace.path)));
-    let generation = state
-        .runtimes
-        .start(target.clone(), workspace.path, bridge.clone())
-        .await?;
-
-    if let Some(session_path) = session_path {
-        let activation = restore_session(bridge.as_ref(), &target, &session_path).await;
-        if let Err(error) = activation {
-            if let Some(entry) = state.runtimes.remove_exact(&target, generation).await {
-                let _ = entry.bridge.stop().await;
-            }
-            return Err(error.into());
-        }
-    }
-
-    start_event_forwarder(app, state.runtimes.clone(), generation, bridge);
-    Ok(())
-}
-
-async fn restore_session(
-    bridge: &(impl RuntimeBridge + ?Sized),
-    target: &RuntimeTarget,
-    session_path: &std::path::Path,
-) -> Result<(), RuntimeError> {
-    let switch = bridge
-        .send(serde_json::json!({
-            "id": "restore-session",
-            "type": "switch_session",
-            "sessionPath": session_path,
-        }))
-        .await?;
-    let data = switch.get("data").and_then(Value::as_object);
-    if switch.get("success") != Some(&Value::Bool(true))
-        || data.and_then(|data| data.get("cancelled")) == Some(&Value::Bool(true))
-    {
-        return Err(RuntimeError::Bridge(
-            "Pi did not restore the requested session".into(),
-        ));
-    }
-    let current = bridge
-        .send(serde_json::json!({ "id": "verify-session", "type": "get_state" }))
-        .await?;
-    let metadata = current.get("data").and_then(Value::as_object);
-    if current.get("success") != Some(&Value::Bool(true))
-        || metadata.and_then(|data| data.get("sessionId"))
-            != Some(&Value::String(target.session_id.clone()))
-        || metadata.and_then(|data| data.get("sessionFile"))
-            != Some(&Value::String(session_path.to_string_lossy().into_owned()))
-    {
-        return Err(RuntimeError::Bridge(
-            "Pi restored a session different from the requested target".into(),
-        ));
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn bind_session(
-    state: State<'_, AppState>,
-    target: RuntimeTarget,
     session_id: String,
-) -> Result<RuntimeTarget, CommandError> {
-    state.validate_target(&target).await?;
-    state
-        .runtimes
-        .rekey(&target, session_id)
-        .await
-        .map_err(Into::into)
+    session_path: PathBuf,
+) -> Result<(), CommandError> {
+    let workspace = state.workspace().await?;
+    let process = state
+        .processes
+        .start(
+            session_id.clone(),
+            Some(&session_path),
+            &default_session_directory(&workspace.path),
+            &workspace.path,
+        )
+        .await?;
+    start_event_forwarder(app, state.processes.clone(), session_id, process);
+    Ok(())
+}
+
+/// Creates a Pi session in its own process, then registers that process by the
+/// stable session ID Pi returned. The temporary process is never exposed to UI.
+#[tauri::command]
+pub async fn create_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PersistedSession, CommandError> {
+    let workspace = state.workspace().await?;
+    let bridge = Arc::new(AgentBridge::pi(
+        &default_session_directory(&workspace.path),
+        None,
+    ));
+    bridge.start_agent(&workspace.path).await?;
+    bridge
+        .send_rpc(serde_json::json!({ "id": "create-session", "type": "new_session" }))
+        .await?;
+    let response = bridge
+        .send_rpc(serde_json::json!({ "id": "create-session-state", "type": "get_state" }))
+        .await?;
+    let metadata = response
+        .get("data")
+        .and_then(Value::as_object)
+        .ok_or_else(|| CommandError {
+            message: "Pi did not return the new session state.".into(),
+        })?;
+    let id = metadata
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CommandError {
+            message: "Pi did not return a new session id.".into(),
+        })?
+        .to_owned();
+    let path = metadata
+        .get("sessionFile")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .ok_or_else(|| CommandError {
+            message: "Pi did not return a new session file.".into(),
+        })?;
+    let process = state.processes.register(id.clone(), bridge).await?;
+    start_event_forwarder(app, state.processes.clone(), id.clone(), process);
+    Ok(PersistedSession {
+        id: id.clone(),
+        path,
+        title: id,
+    })
 }
 
 #[tauri::command]
 pub async fn send_rpc(
     state: State<'_, AppState>,
-    target: RuntimeTarget,
+    session_id: String,
     request: Value,
 ) -> Result<Value, CommandError> {
-    state.validate_target(&target).await?;
-    state
-        .runtimes
-        .send(&target, request)
-        .await
-        .map_err(Into::into)
+    Ok(state
+        .processes
+        .process(&session_id)
+        .await?
+        .bridge
+        .send_rpc(request)
+        .await?)
 }
 
 #[tauri::command]
-pub async fn abort_agent(
+pub async fn abort_session(
     state: State<'_, AppState>,
-    target: RuntimeTarget,
+    session_id: String,
 ) -> Result<Value, CommandError> {
-    state.validate_target(&target).await?;
-    state.runtimes.abort(&target).await.map_err(Into::into)
+    Ok(state
+        .processes
+        .process(&session_id)
+        .await?
+        .bridge
+        .abort_agent()
+        .await?)
+}
+
+fn start_event_forwarder(
+    app: AppHandle,
+    processes: Arc<SessionProcessManager>,
+    session_id: String,
+    process: SessionProcess,
+) {
+    let mut events = process.bridge.subscribe_events();
+    tauri::async_runtime::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            let terminal = matches!(
+                event.get("type").and_then(Value::as_str),
+                Some("agent_settled") | Some("bridge_error")
+            );
+            app.emit(
+                rpc_event_name(),
+                SessionProcessEvent {
+                    session_id: session_id.clone(),
+                    instance_id: process.instance_id,
+                    event,
+                },
+            )
+            .expect("Pi RPC event envelope must serialize for the Tauri webview");
+            if terminal {
+                if let Some(process) = processes
+                    .remove_if_current(&session_id, process.instance_id)
+                    .await
+                {
+                    let _ = process.bridge.stop_agent().await;
+                }
+                return;
+            }
+        }
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        future::Future,
-        path::{Path, PathBuf},
-        pin::Pin,
-        sync::{Arc, Mutex},
-    };
-
-    use serde_json::{json, Value};
-
-    use super::{restore_session, AppState, CurrentWorkspace};
-    use crate::runtime::{RuntimeBridge, RuntimeError, RuntimeTarget};
-
-    struct RestoreBridge {
-        responses: Mutex<Vec<Result<Value, RuntimeError>>>,
-        requests: Arc<Mutex<Vec<Value>>>,
-    }
-
-    impl RuntimeBridge for RestoreBridge {
-        fn start<'a>(
-            &'a self,
-            _: &'a Path,
-        ) -> Pin<Box<dyn Future<Output = Result<(), RuntimeError>> + Send + 'a>> {
-            Box::pin(async { Ok(()) })
-        }
-        fn send<'a>(
-            &'a self,
-            request: Value,
-        ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + Send + 'a>> {
-            Box::pin(async move {
-                self.requests.lock().unwrap().push(request);
-                self.responses.lock().unwrap().remove(0)
-            })
-        }
-        fn abort<'a>(
-            &'a self,
-        ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + Send + 'a>> {
-            Box::pin(async { Ok(json!({})) })
-        }
-        fn stop<'a>(
-            &'a self,
-        ) -> Pin<Box<dyn Future<Output = Result<(), RuntimeError>> + Send + 'a>> {
-            Box::pin(async { Ok(()) })
-        }
-    }
-
-    fn target() -> RuntimeTarget {
-        RuntimeTarget {
-            project_id: "project-a".into(),
-            session_id: "session-a".into(),
-        }
-    }
-
-    #[tokio::test]
-    async fn restore_switches_then_verifies_exact_persisted_identity() {
-        let requests = Arc::new(Mutex::new(vec![]));
-        let bridge = RestoreBridge {
-            responses: Mutex::new(vec![
-                Ok(json!({ "success": true, "data": {} })),
-                Ok(
-                    json!({ "success": true, "data": { "sessionId": "session-a", "sessionFile": "/sessions/a.jsonl" } }),
-                ),
-            ]),
-            requests: requests.clone(),
-        };
-        restore_session(&bridge, &target(), Path::new("/sessions/a.jsonl"))
-            .await
-            .unwrap();
-        assert_eq!(
-            *requests.lock().unwrap(),
-            vec![
-                json!({ "id": "restore-session", "type": "switch_session", "sessionPath": "/sessions/a.jsonl" }),
-                json!({ "id": "verify-session", "type": "get_state" }),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn restore_rejects_cancelled_switch_without_state_request() {
-        let requests = Arc::new(Mutex::new(vec![]));
-        let bridge = RestoreBridge {
-            responses: Mutex::new(vec![Ok(
-                json!({ "success": true, "data": { "cancelled": true } }),
-            )]),
-            requests: requests.clone(),
-        };
-        assert!(
-            restore_session(&bridge, &target(), Path::new("/sessions/a.jsonl"))
-                .await
-                .is_err()
-        );
-        assert_eq!(requests.lock().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn restore_rejects_mismatched_pi_state() {
-        let bridge = RestoreBridge {
-            responses: Mutex::new(vec![
-                Ok(json!({ "success": true, "data": {} })),
-                Ok(
-                    json!({ "success": true, "data": { "sessionId": "other", "sessionFile": "/sessions/a.jsonl" } }),
-                ),
-            ]),
-            requests: Arc::new(Mutex::new(vec![])),
-        };
-        assert!(
-            restore_session(&bridge, &target(), Path::new("/sessions/a.jsonl"))
-                .await
-                .is_err()
-        );
-    }
+    use super::{AppState, CurrentWorkspace};
+    use std::path::PathBuf;
 
     #[test]
     fn canonical_workspace_has_a_stable_opaque_identity() {
@@ -517,40 +410,4 @@ mod tests {
             .blocking_lock()
             .is_none());
     }
-}
-
-fn start_event_forwarder(
-    app: AppHandle,
-    runtimes: Arc<RuntimeRegistry<AgentBridge>>,
-    generation: u64,
-    bridge: Arc<AgentBridge>,
-) {
-    let mut events = bridge.subscribe_events();
-    tauri::async_runtime::spawn(async move {
-        while let Ok(event) = events.recv().await {
-            let Some(target) = runtimes.target_for_generation(generation).await else {
-                return;
-            };
-            let terminal = matches!(
-                event.get("type").and_then(Value::as_str),
-                Some("agent_settled") | Some("bridge_error")
-            );
-            app.emit(
-                rpc_event_name(),
-                RuntimeEvent {
-                    project_id: target.project_id.clone(),
-                    session_id: target.session_id.clone(),
-                    generation,
-                    event,
-                },
-            )
-            .expect("Pi RPC event envelope must serialize for the Tauri webview");
-            if terminal {
-                if let Some(entry) = runtimes.remove_exact(&target, generation).await {
-                    let _ = entry.bridge.stop().await;
-                }
-                return;
-            }
-        }
-    });
 }

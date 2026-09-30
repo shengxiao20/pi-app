@@ -448,6 +448,14 @@ textarea:focus-visible {
   font-weight: 700;
 }
 
+.session-copy .inline-rename {
+  align-self: center;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
 .session-copy small {
   color: #6d737a;
   font-family: "SFMono-Regular", Consolas, monospace;
@@ -1134,10 +1142,6 @@ textarea::placeholder {
   stroke-linecap: round;
   stroke-width: 1.75;
   width: 14px;
-}
-.tag-row.is-drop-target {
-  outline: 1px dashed #4f799b;
-  outline-offset: -2px;
 }
 .new-tag-form {
   align-items: center;
