@@ -13,6 +13,47 @@ import { test } from "node:test";
 
 const repositoryRoot = process.cwd();
 
+test("defines a Windows x64 native build workflow", () => {
+  const workflow = readFileSync(
+    join(repositoryRoot, ".github", "workflows", "build-windows.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /runs-on:\s*windows-latest/);
+  assert.match(workflow, /npm run build:native/);
+  assert.match(workflow, /node --experimental-strip-types --test/);
+  assert.match(workflow, /npm pack --ignore-scripts/);
+  assert.match(
+    workflow,
+    /packages\/pi-native-app-win32-x64-msvc\/bin\/pi-native-app\.exe/,
+  );
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+});
+
+test("declares the Windows x64 native package in the release manifest", () => {
+  const packageManifest = JSON.parse(
+    readFileSync(join(repositoryRoot, "package.json"), "utf8"),
+  );
+  assert.equal(
+    packageManifest.optionalDependencies["pi-native-app-win32-x64-msvc"],
+    "file:packages/pi-native-app-win32-x64-msvc",
+  );
+  assert.ok(
+    packageManifest.bundledDependencies.includes(
+      "pi-native-app-win32-x64-msvc",
+    ),
+  );
+  assert.ok(
+    existsSync(
+      join(
+        repositoryRoot,
+        "packages",
+        "pi-native-app-win32-x64-msvc",
+        "package.json",
+      ),
+    ),
+  );
+});
+
 test("rebuilds Tauri's embedded frontend assets whenever Vite updates desktop/dist", () => {
   const buildScript = readFileSync(
     join(repositoryRoot, "desktop", "src-tauri", "build.rs"),

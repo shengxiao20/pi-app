@@ -1,0 +1,60 @@
+name: Build Windows native package
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows native binary
+        run: npm run build:native
+
+      - name: Verify Windows package
+        shell: pwsh
+        run: |
+          $binary = "packages/pi-native-app-win32-x64-msvc/bin/pi-native-app.exe"
+          if (-not (Test-Path $binary)) {
+            throw "Windows native binary is missing: $binary"
+          }
+          $size = (Get-Item $binary).Length
+          if ($size -le 0) {
+            throw "Windows native binary is empty: $binary"
+          }
+          Write-Host "Verified $binary ($size bytes)"
+
+      - name: Run Windows package tests
+        run: node --experimental-strip-types --test tests/launcher/index.test.mjs tests/release-version.test.mjs
+
+      - name: Pack Windows npm artifact
+        run: npm pack --ignore-scripts --pack-destination artifacts
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-native-app-windows-x64
+          path: |
+            packages/pi-native-app-win32-x64-msvc/bin/pi-native-app.exe
+            artifacts/*.tgz

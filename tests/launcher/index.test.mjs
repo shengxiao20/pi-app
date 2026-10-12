@@ -40,6 +40,27 @@ test("rejects unsupported operating systems and architectures explicitly", () =>
   );
 });
 
+test("resolves a platform binary from a local workspace package", () => {
+  const packageRoot = mkdtempSync(join(tmpdir(), "pi-app-launcher-"));
+  const binaryPath = join(
+    packageRoot,
+    "packages",
+    "pi-native-app-darwin-arm64",
+    "bin",
+    "pi-native-app",
+  );
+  mkdirSync(
+    join(packageRoot, "packages", "pi-native-app-darwin-arm64", "bin"),
+    { recursive: true },
+  );
+  writeFileSync(binaryPath, "desktop binary");
+
+  assert.equal(
+    resolveDesktopBinary({ platform: "darwin", arch: "arm64", packageRoot }),
+    binaryPath,
+  );
+});
+
 test("resolves the platform package binary and rejects a missing binary explicitly", () => {
   const packageRoot = mkdtempSync(join(tmpdir(), "pi-app-launcher-"));
   const binaryPath = join(

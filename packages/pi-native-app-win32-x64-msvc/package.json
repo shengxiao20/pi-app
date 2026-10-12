@@ -1,0 +1,9 @@
+{
+  "name": "pi-native-app-win32-x64-msvc",
+  "version": "0.1.7",
+  "private": false,
+  "description": "Pi Native App binary for Windows x64",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin/pi-native-app.exe"]
+}

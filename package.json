@@ -1,6 +1,6 @@
 {
   "name": "pi-native-app",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Native desktop client for the Pi coding-agent harness",
   "license": "MIT",
   "repository": {
@@ -32,10 +32,12 @@
     "extensions"
   ],
   "optionalDependencies": {
-    "pi-native-app-darwin-arm64": "file:packages/pi-native-app-darwin-arm64"
+    "pi-native-app-darwin-arm64": "file:packages/pi-native-app-darwin-arm64",
+    "pi-native-app-win32-x64-msvc": "file:packages/pi-native-app-win32-x64-msvc"
   },
   "bundledDependencies": [
-    "pi-native-app-darwin-arm64"
+    "pi-native-app-darwin-arm64",
+    "pi-native-app-win32-x64-msvc"
   ],
   "pi": {
     "extensions": [
@@ -56,7 +58,7 @@
     "rust:clippy": "cargo clippy --manifest-path desktop/src-tauri/Cargo.toml -- -D warnings",
     "rust:test": "cargo test --manifest-path desktop/src-tauri/Cargo.toml",
     "build:launcher": "tsc -p tsconfig.launcher.json",
-    "build:native": "npm exec --yes @tauri-apps/cli -- build --bundles app --config desktop/src-tauri/tauri.conf.json && node scripts/package-native.mjs",
+    "build:native": "node scripts/build-native.mjs && node scripts/package-native.mjs",
     "prepack": "npm run build:launcher && npm run build:native",
     "test:packaging": "node --test tests/packaging/smoke.test.mjs"
   }
