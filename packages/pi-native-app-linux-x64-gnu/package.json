@@ -1,6 +1,6 @@
 {
   "name": "pi-native-app-linux-x64-gnu",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "description": "Pi Native App binary for Linux x64",
   "os": [

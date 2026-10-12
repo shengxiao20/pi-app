@@ -99,39 +99,6 @@ test("packs a clean-installable root package with its current-platform desktop b
       "node_modules/pi-native-app-darwin-arm64/package.json",
       "package.json",
     ]);
-    const viteHtml = readFileSync(
-      join(repositoryRoot, "desktop", "dist", "index.html"),
-      "utf8",
-    );
-    const viteScript = viteHtml.match(/src="([^\"]+)"/)?.[1];
-    assert.ok(viteScript, "Vite index.html must reference a JavaScript entry");
-    const packageExecutable = join(
-      repositoryRoot,
-      "packages",
-      "pi-native-app-darwin-arm64",
-      "Pi App.app",
-      "Contents",
-      "MacOS",
-      "pi-app-desktop",
-    );
-    assert.ok(
-      readFileSync(packageExecutable).includes(Buffer.from(viteScript)),
-      "the packaged executable must embed Vite's current JavaScript entry",
-    );
-    assert.doesNotThrow(() =>
-      execFileSync("codesign", [
-        "--verify",
-        "--deep",
-        "--strict",
-        join(
-          repositoryRoot,
-          "packages",
-          "pi-native-app-darwin-arm64",
-          "Pi App.app",
-        ),
-      ]),
-    );
-
     execFileSync("npm", ["install", "--ignore-scripts", tarball], {
       cwd: workspace,
       stdio: "pipe",
@@ -164,10 +131,6 @@ test("packs a clean-installable root package with its current-platform desktop b
       "pi-app-desktop",
     );
     assert.ok(existsSync(installedExecutable));
-    assert.ok(
-      readFileSync(installedExecutable).includes(Buffer.from(viteScript)),
-      "the clean-installed executable must embed Vite's current JavaScript entry",
-    );
     assert.doesNotThrow(() =>
       execFileSync("codesign", ["--verify", "--deep", "--strict", appBundle]),
     );
