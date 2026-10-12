@@ -29,6 +29,14 @@ test("defines the cross-platform release workflow", () => {
   assert.doesNotMatch(workflow, /git push origin/);
 });
 
+test("keeps platform artifact packages out of npm workspaces", () => {
+  const packageManifest = JSON.parse(
+    readFileSync(join(repositoryRoot, "package.json"), "utf8"),
+  );
+
+  assert.deepEqual(packageManifest.workspaces, ["desktop"]);
+});
+
 test("declares the Windows x64 native package in the release manifest", () => {
   const packageManifest = JSON.parse(
     readFileSync(join(repositoryRoot, "package.json"), "utf8"),
