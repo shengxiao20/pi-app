@@ -73,6 +73,31 @@ function createClient() {
 describe("App workspace boundary", () => {
   afterEach(cleanup);
 
+  it("renders LaTex display math from persisted Pi messages", async () => {
+    const fake = createClient();
+    fake.client.sessionHistory = vi.fn().mockResolvedValue({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "\\[ \\text{答案} = n - \\text{最终安全块长度} \\]",
+            },
+          ],
+        },
+      ],
+      before: 0,
+      hasMore: false,
+    });
+    render(<App client={fake.client} />);
+
+    await waitFor(() =>
+      expect(document.querySelector(".katex")?.textContent).toContain("答案"),
+    );
+    expect(document.querySelector(".katex annotation")).toBeTruthy();
+  });
+
   it("renders a flattened GitHub Markdown table as an accessible table", async () => {
     const fake = createClient();
     fake.client.sessionHistory = vi.fn().mockResolvedValue({
