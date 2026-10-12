@@ -17,5 +17,5 @@ execFileSync(
     "--config",
     "desktop/src-tauri/tauri.conf.json",
   ],
-  { stdio: "inherit" },
+  { shell: platform() === "win32", stdio: "inherit" },
 );

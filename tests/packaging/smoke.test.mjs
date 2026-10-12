@@ -65,6 +65,19 @@ test("declares the Windows x64 native package in the release manifest", () => {
   );
 });
 
+test("runs the Tauri CLI through a Windows command shell", () => {
+  const buildScript = readFileSync(
+    join(repositoryRoot, "scripts", "build-native.mjs"),
+    "utf8",
+  );
+
+  assert.match(
+    buildScript,
+    /const npmCommand = platform\(\) === "win32" \? "npm\.cmd" : "npm"/,
+  );
+  assert.match(buildScript, /shell:\s*platform\(\) === "win32"/);
+});
+
 test("rebuilds Tauri's embedded frontend assets whenever Vite updates desktop/dist", () => {
   const buildScript = readFileSync(
     join(repositoryRoot, "desktop", "src-tauri", "build.rs"),
