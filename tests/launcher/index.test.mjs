@@ -20,10 +20,6 @@ test("resolves every supported operating system and architecture to its platform
     "pi-native-app-darwin-x64",
   );
   assert.equal(
-    resolvePlatformPackageName("linux", "x64"),
-    "pi-native-app-linux-x64-gnu",
-  );
-  assert.equal(
     resolvePlatformPackageName("win32", "x64"),
     "pi-native-app-win32-x64-msvc",
   );
@@ -84,7 +80,7 @@ test("resolves the platform package binary and rejects a missing binary explicit
   );
   assert.throws(
     () => resolveDesktopBinary({ platform: "linux", arch: "x64", packageRoot }),
-    /Pi App desktop binary is missing: .*pi-native-app-linux-x64-gnu\/bin\/pi-native-app/,
+    /Unsupported Pi App desktop platform: linux-x64/,
   );
 });
 

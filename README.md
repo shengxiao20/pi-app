@@ -71,6 +71,6 @@ The release contains prebuilt native applications for macOS Apple Silicon (`darw
 
 ## Development and release
 
-Update every version field locally and merge that version bump through a normal PR. Then run **Publish Pi Native App release** manually from GitHub Actions. It reads the merged `main` version, builds macOS ARM64, Windows x64, and Linux x64 binaries on native runners, creates the GitHub Release and matching `v<version>` tag, and publishes the platform packages followed by the root package to npm.
+Update every version field locally and merge that version bump through a normal PR. Then run **Publish Pi Native App release** manually from GitHub Actions. It reads the merged `main` version, builds macOS ARM64 and Windows x64 binaries on native runners, creates the GitHub Release and matching `v<version>` tag, and publishes the platform packages followed by the root package to npm.
 
 The repository requires an `NPM_TOKEN` GitHub Actions secret with permission to publish `pi-native-app` and its platform packages. The npm tarball contains the Pi extension, compiled launcher, license/readme, and the platform-specific prebuilt native bundle selected by npm for the user's operating system and architecture.

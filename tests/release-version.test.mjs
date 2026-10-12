@@ -24,7 +24,6 @@ test("release metadata and documentation declare one consistent version", () => 
     readJsonVersion("desktop/src-tauri/tauri.conf.json"),
     readJsonVersion("packages/pi-native-app-darwin-arm64/package.json"),
     readJsonVersion("packages/pi-native-app-win32-x64-msvc/package.json"),
-    readJsonVersion("packages/pi-native-app-linux-x64-gnu/package.json"),
     readTextVersion("desktop/src-tauri/Cargo.toml", /^version = "([^"]+)"/m),
     readTextVersion("README.md", /Current release: \*\*([^*]+)\*\*/),
   ];
@@ -42,9 +41,6 @@ test("release metadata and documentation declare one consistent version", () => 
     packageManifest.bundledDependencies.includes(
       "pi-native-app-win32-x64-msvc",
     ),
-  );
-  assert.ok(
-    packageManifest.bundledDependencies.includes("pi-native-app-linux-x64-gnu"),
   );
 
   const windowsPackage = JSON.parse(

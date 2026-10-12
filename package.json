@@ -32,13 +32,11 @@
   ],
   "optionalDependencies": {
     "pi-native-app-darwin-arm64": "file:packages/pi-native-app-darwin-arm64",
-    "pi-native-app-win32-x64-msvc": "file:packages/pi-native-app-win32-x64-msvc",
-    "pi-native-app-linux-x64-gnu": "file:packages/pi-native-app-linux-x64-gnu"
+    "pi-native-app-win32-x64-msvc": "file:packages/pi-native-app-win32-x64-msvc"
   },
   "bundledDependencies": [
     "pi-native-app-darwin-arm64",
-    "pi-native-app-win32-x64-msvc",
-    "pi-native-app-linux-x64-gnu"
+    "pi-native-app-win32-x64-msvc"
   ],
   "pi": {
     "extensions": [
