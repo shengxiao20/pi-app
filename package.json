@@ -22,8 +22,7 @@
     "tauri"
   ],
   "workspaces": [
-    "desktop",
-    "packages/*"
+    "desktop"
   ],
   "files": [
     "README.md",
