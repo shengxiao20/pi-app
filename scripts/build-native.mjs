@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { platform } from "node:os";
 
+const npmCommand = platform() === "win32" ? "npm.cmd" : "npm";
 const bundleArguments =
   platform() === "darwin" ? ["--bundles", "app"] : ["--no-bundle"];
 
 execFileSync(
-  "npm",
+  npmCommand,
   [
     "exec",
     "--yes",

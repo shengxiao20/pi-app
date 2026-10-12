@@ -21,7 +21,7 @@ test("defines the cross-platform release workflow", () => {
   assert.match(workflow, /ref: main/);
   assert.match(workflow, /macos-14/);
   assert.match(workflow, /windows-latest/);
-  assert.match(workflow, /ubuntu-latest/);
+  assert.doesNotMatch(workflow, /build-linux|pi-native-app-linux/);
   assert.match(workflow, /npm publish/);
   assert.match(workflow, /softprops\/action-gh-release@v2/);
 
@@ -49,6 +49,9 @@ test("declares the Windows x64 native package in the release manifest", () => {
     packageManifest.bundledDependencies.includes(
       "pi-native-app-win32-x64-msvc",
     ),
+  );
+  assert.ok(
+    !packageManifest.optionalDependencies["pi-native-app-linux-x64-gnu"],
   );
   assert.ok(
     existsSync(

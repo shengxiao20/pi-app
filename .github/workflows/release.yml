@@ -80,29 +80,8 @@ jobs:
           name: native-windows-x64
           path: packages/pi-native-app-win32-x64-msvc
 
-  build-linux:
-    needs: release-context
-    if: needs.release-context.outputs.should_publish == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - run: npm ci
-      - run: npm run build:native
-      - run: test -s packages/pi-native-app-linux-x64-gnu/bin/pi-native-app
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-linux-x64
-          path: packages/pi-native-app-linux-x64-gnu
-
   publish:
-    needs: [release-context, build-macos, build-windows, build-linux]
+    needs: [release-context, build-macos, build-windows]
     if: needs.release-context.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -128,7 +107,6 @@ jobs:
           root.optionalDependencies = {
             'pi-native-app-darwin-arm64': process.env.RELEASE_VERSION,
             'pi-native-app-win32-x64-msvc': process.env.RELEASE_VERSION,
-            'pi-native-app-linux-x64-gnu': process.env.RELEASE_VERSION,
           };
           root.bundledDependencies = Object.keys(root.optionalDependencies);
           fs.writeFileSync('package.json', JSON.stringify(root, null, 2) + '\n');
@@ -136,9 +114,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: npm publish packages/pi-native-app-win32-x64-msvc --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: npm publish packages/pi-native-app-linux-x64-gnu --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Install published platform packages into root staging tree
@@ -154,4 +129,3 @@ jobs:
           files: |
             packages/pi-native-app-darwin-arm64/Pi App.app/Contents/MacOS/pi-app-desktop
             packages/pi-native-app-win32-x64-msvc/bin/pi-native-app.exe
-            packages/pi-native-app-linux-x64-gnu/bin/pi-native-app

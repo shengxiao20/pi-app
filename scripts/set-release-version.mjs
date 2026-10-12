@@ -13,7 +13,6 @@ const jsonFiles = [
   "desktop/src-tauri/tauri.conf.json",
   "packages/pi-native-app-darwin-arm64/package.json",
   "packages/pi-native-app-win32-x64-msvc/package.json",
-  "packages/pi-native-app-linux-x64-gnu/package.json",
 ];
 
 for (const relativePath of jsonFiles) {
@@ -25,8 +24,6 @@ for (const relativePath of jsonFiles) {
       `file:packages/pi-native-app-darwin-arm64`;
     value.optionalDependencies["pi-native-app-win32-x64-msvc"] =
       `file:packages/pi-native-app-win32-x64-msvc`;
-    value.optionalDependencies["pi-native-app-linux-x64-gnu"] =
-      `file:packages/pi-native-app-linux-x64-gnu`;
   }
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
