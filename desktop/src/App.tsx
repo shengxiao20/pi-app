@@ -7,8 +7,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import "katex/dist/katex.min.css";
+
 import ReactMarkdown from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 
 import type {
   PersistedSession,
@@ -1357,8 +1361,11 @@ function HistoryEntryView({ entry }: { entry: HistoryEntry }) {
       <div>
         <strong>{entry.role === "user" ? "You" : "Pi"}</strong>
         <div className="markdown">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {normalizeMarkdown(entry.text)}
+          <ReactMarkdown
+            rehypePlugins={[rehypeKatex]}
+            remarkPlugins={[remarkGfm, remarkMath]}
+          >
+            {normalizeMarkdown(normalizeMath(entry.text))}
           </ReactMarkdown>
         </div>
       </div>
@@ -1603,6 +1610,12 @@ function mapHistory(messages: unknown[]): HistoryEntry[] {
   }
   return history;
 }
+function normalizeMath(text: string): string {
+  return text
+    .replace(/\\\[([\s\S]*?)\\\]/g, "$$\n$1\n$$")
+    .replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$$");
+}
+
 function normalizeMarkdown(text: string): string {
   const delimiter = /\|(?:\s*:?-{3,}:?\s*\|)+/;
   const match = delimiter.exec(text);
