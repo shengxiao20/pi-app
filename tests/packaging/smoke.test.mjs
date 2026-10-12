@@ -13,20 +13,17 @@ import { test } from "node:test";
 
 const repositoryRoot = process.cwd();
 
-test("defines a Windows x64 native build workflow", () => {
+test("defines the cross-platform release workflow", () => {
   const workflow = readFileSync(
-    join(repositoryRoot, ".github", "workflows", "build-windows.yml"),
+    join(repositoryRoot, ".github", "workflows", "release.yml"),
     "utf8",
   );
-  assert.match(workflow, /runs-on:\s*windows-latest/);
-  assert.match(workflow, /npm run build:native/);
-  assert.match(workflow, /node --experimental-strip-types --test/);
-  assert.match(workflow, /npm pack --ignore-scripts/);
-  assert.match(
-    workflow,
-    /packages\/pi-native-app-win32-x64-msvc\/bin\/pi-native-app\.exe/,
-  );
-  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /workflow_dispatch/);
+  assert.match(workflow, /macos-14/);
+  assert.match(workflow, /windows-latest/);
+  assert.match(workflow, /ubuntu-latest/);
+  assert.match(workflow, /npm publish/);
+  assert.match(workflow, /softprops\/action-gh-release@v2/);
 });
 
 test("declares the Windows x64 native package in the release manifest", () => {

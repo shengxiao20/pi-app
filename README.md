@@ -71,11 +71,6 @@ The release contains prebuilt native applications for macOS Apple Silicon (`darw
 
 ## Development and release
 
-Release artifacts are built by maintainers before publishing:
+Releases are built and published by `.github/workflows/release.yml`. Run it manually from GitHub Actions with a semver version such as `0.1.8`; the workflow updates release metadata, creates the `v0.1.8` tag, builds macOS ARM64, Windows x64, and Linux x64 binaries on native runners, creates a GitHub Release, and publishes the platform packages followed by the root package to npm.
 
-```sh
-npm run build:native
-npm pack --dry-run
-```
-
-The npm tarball contains only the Pi extension, compiled launcher, license/readme, and the prebuilt native bundle for the supported platform.
+The repository requires an `NPM_TOKEN` GitHub Actions secret with permission to publish `pi-native-app` and its platform packages. The npm tarball contains the Pi extension, compiled launcher, license/readme, and the platform-specific prebuilt native bundle selected by npm for the user's operating system and architecture.

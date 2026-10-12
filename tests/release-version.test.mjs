@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 const repositoryRoot = process.cwd();
-const releaseVersion = "0.1.7";
+const releaseVersion = JSON.parse(
+  readFileSync(join(repositoryRoot, "package.json"), "utf8"),
+).version;
 
 const readJsonVersion = (path) =>
   JSON.parse(readFileSync(join(repositoryRoot, path), "utf8")).version;
@@ -15,13 +17,14 @@ const readTextVersion = (path, pattern) => {
   return match[1];
 };
 
-test("release metadata and documentation declare version 0.1.7", () => {
+test("release metadata and documentation declare one consistent version", () => {
   const versions = [
     readJsonVersion("package.json"),
     readJsonVersion("desktop/package.json"),
     readJsonVersion("desktop/src-tauri/tauri.conf.json"),
     readJsonVersion("packages/pi-native-app-darwin-arm64/package.json"),
     readJsonVersion("packages/pi-native-app-win32-x64-msvc/package.json"),
+    readJsonVersion("packages/pi-native-app-linux-x64-gnu/package.json"),
     readTextVersion("desktop/src-tauri/Cargo.toml", /^version = "([^"]+)"/m),
     readTextVersion("README.md", /Current release: \*\*([^*]+)\*\*/),
   ];
@@ -31,14 +34,17 @@ test("release metadata and documentation declare version 0.1.7", () => {
   const packageManifest = JSON.parse(
     readFileSync(join(repositoryRoot, "package.json"), "utf8"),
   );
-  assert.equal(
+  assert.match(
     packageManifest.optionalDependencies["pi-native-app-win32-x64-msvc"],
-    "file:packages/pi-native-app-win32-x64-msvc",
+    /^(?:file:|\d+\.\d+\.\d+)/,
   );
   assert.ok(
     packageManifest.bundledDependencies.includes(
       "pi-native-app-win32-x64-msvc",
     ),
+  );
+  assert.ok(
+    packageManifest.bundledDependencies.includes("pi-native-app-linux-x64-gnu"),
   );
 
   const windowsPackage = JSON.parse(
