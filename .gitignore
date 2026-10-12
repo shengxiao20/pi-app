@@ -13,6 +13,10 @@ target/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 
+# Native platform artifacts are built and published only by release CI.
+packages/*/bin/
+packages/*/Pi App.app/
+
 # Environment and local editor state
 .env
 .env.*
