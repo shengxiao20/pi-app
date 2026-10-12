@@ -1,12 +1,7 @@
-name: Release Pi Native App
+name: Publish Pi Native App release
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version, for example 0.1.8"
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -15,43 +10,35 @@ env:
   NODE_VERSION: 22
 
 jobs:
-  prepare:
+  release-context:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      ref: ${{ steps.version.outputs.ref }}
+      should_publish: ${{ steps.version.outputs.should_publish }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          ref: main
       - id: version
         shell: bash
         run: |
-          version="${{ inputs.version }}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid semver: $version" >&2
-            exit 1
+          version=$(node --input-type=module --eval "import manifest from './package.json' with { type: 'json' }; console.log(manifest.version)")
+          if npm view "pi-native-app@$version" version --json 2>/dev/null | grep -q "\"$version\""; then
+            echo "Version $version is already published; skipping release."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
           fi
-          node scripts/set-release-version.mjs "$version"
-          npm install --package-lock-only --force --ignore-scripts
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md package.json package-lock.json desktop/package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json packages/*/package.json
-          git diff --cached --quiet || git commit -m "chore: release v$version"
-          git tag -a "v$version" -m "Release v$version"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
-          git push origin "v$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "ref=v$version" >> "$GITHUB_OUTPUT"
 
   build-macos:
-    needs: prepare
+    needs: release-context
+    if: needs.release-context.outputs.should_publish == 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -66,12 +53,13 @@ jobs:
           path: packages/pi-native-app-darwin-arm64
 
   build-windows:
-    needs: prepare
+    needs: release-context
+    if: needs.release-context.outputs.should_publish == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -93,12 +81,13 @@ jobs:
           path: packages/pi-native-app-win32-x64-msvc
 
   build-linux:
-    needs: prepare
+    needs: release-context
+    if: needs.release-context.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -113,12 +102,13 @@ jobs:
           path: packages/pi-native-app-linux-x64-gnu
 
   publish:
-    needs: [prepare, build-macos, build-windows, build-linux]
+    needs: [release-context, build-macos, build-windows, build-linux]
+    if: needs.release-context.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -131,7 +121,7 @@ jobs:
       - name: Prepare npm manifests
         shell: node {0}
         env:
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
         run: |
           const fs = require('node:fs');
           const root = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -142,12 +132,6 @@ jobs:
           };
           root.bundledDependencies = Object.keys(root.optionalDependencies);
           fs.writeFileSync('package.json', JSON.stringify(root, null, 2) + '\n');
-          for (const name of root.bundledDependencies) {
-            const path = `packages/${name}/package.json`;
-            const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
-            manifest.version = process.env.RELEASE_VERSION;
-            fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
-          }
       - run: npm publish packages/pi-native-app-darwin-arm64 --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -164,7 +148,8 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.prepare.outputs.version }}
+          tag_name: v${{ needs.release-context.outputs.version }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: |
             packages/pi-native-app-darwin-arm64/Pi App.app/Contents/MacOS/pi-app-desktop
