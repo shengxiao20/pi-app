@@ -18,12 +18,15 @@ test("defines the cross-platform release workflow", () => {
     join(repositoryRoot, ".github", "workflows", "release.yml"),
     "utf8",
   );
-  assert.match(workflow, /workflow_dispatch/);
+  assert.match(workflow, /ref: main/);
   assert.match(workflow, /macos-14/);
   assert.match(workflow, /windows-latest/);
   assert.match(workflow, /ubuntu-latest/);
   assert.match(workflow, /npm publish/);
   assert.match(workflow, /softprops\/action-gh-release@v2/);
+
+  assert.match(workflow, /workflow_dispatch/);
+  assert.doesNotMatch(workflow, /git push origin/);
 });
 
 test("declares the Windows x64 native package in the release manifest", () => {
