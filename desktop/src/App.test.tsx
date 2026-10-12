@@ -73,6 +73,32 @@ function createClient() {
 describe("App workspace boundary", () => {
   afterEach(cleanup);
 
+  it("renders a flattened GitHub Markdown table as an accessible table", async () => {
+    const fake = createClient();
+    fake.client.sessionHistory = vi.fn().mockResolvedValue({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "| 配置 | 含义 | |---|---| | push: main | PR merge 到 main 后自动启动 | | workflow_dispatch | 可以从 GitHub Actions 手工启动 |",
+            },
+          ],
+        },
+      ],
+      before: 0,
+      hasMore: false,
+    });
+    render(<App client={fake.client} />);
+
+    expect(await screen.findByRole("table")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "配置" })).toBeTruthy();
+    expect(
+      screen.getByRole("cell", { name: "PR merge 到 main 后自动启动" }),
+    ).toBeTruthy();
+  });
+
   it("shows a single current workspace rather than a Projects catalog", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);

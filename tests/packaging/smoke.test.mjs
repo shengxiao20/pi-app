@@ -13,6 +13,44 @@ import { test } from "node:test";
 
 const repositoryRoot = process.cwd();
 
+test("defines the cross-platform release workflow", () => {
+  const workflow = readFileSync(
+    join(repositoryRoot, ".github", "workflows", "release.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /workflow_dispatch/);
+  assert.match(workflow, /macos-14/);
+  assert.match(workflow, /windows-latest/);
+  assert.match(workflow, /ubuntu-latest/);
+  assert.match(workflow, /npm publish/);
+  assert.match(workflow, /softprops\/action-gh-release@v2/);
+});
+
+test("declares the Windows x64 native package in the release manifest", () => {
+  const packageManifest = JSON.parse(
+    readFileSync(join(repositoryRoot, "package.json"), "utf8"),
+  );
+  assert.equal(
+    packageManifest.optionalDependencies["pi-native-app-win32-x64-msvc"],
+    "file:packages/pi-native-app-win32-x64-msvc",
+  );
+  assert.ok(
+    packageManifest.bundledDependencies.includes(
+      "pi-native-app-win32-x64-msvc",
+    ),
+  );
+  assert.ok(
+    existsSync(
+      join(
+        repositoryRoot,
+        "packages",
+        "pi-native-app-win32-x64-msvc",
+        "package.json",
+      ),
+    ),
+  );
+});
+
 test("rebuilds Tauri's embedded frontend assets whenever Vite updates desktop/dist", () => {
   const buildScript = readFileSync(
     join(repositoryRoot, "desktop", "src-tauri", "build.rs"),

@@ -61,13 +61,23 @@ export function resolveDesktopBinary({
   const packageName = resolvePlatformPackageName(platform, arch);
   const executableName =
     platform === "win32" ? "pi-native-app.exe" : "pi-native-app";
-  const binaryPath = join(
+  const localBinaryPath = join(
+    packageRoot,
+    "packages",
+    packageName,
+    "bin",
+    executableName,
+  );
+  const installedBinaryPath = join(
     packageRoot,
     "node_modules",
     packageName,
     "bin",
     executableName,
   );
+  const binaryPath = existsSync(localBinaryPath)
+    ? localBinaryPath
+    : installedBinaryPath;
 
   if (!existsSync(binaryPath)) {
     throw new Error(`Pi App desktop binary is missing: ${binaryPath}`);

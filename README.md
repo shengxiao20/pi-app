@@ -1,6 +1,6 @@
 # Pi Native App
 
-Current release: **0.1.6**.
+Current release: **0.1.7**.
 
 Native desktop client for the [Pi coding-agent harness](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
 
@@ -63,17 +63,14 @@ A workspace with no existing session directory starts with no sessions; Pi creat
 
 Finder and Dock do not inherit your terminal's `PATH`. On macOS, Pi App starts that same documented command through the user's zsh login/interactive environment. This makes npm/NVM-installed `pi` and its Node interpreter available; zsh immediately `exec`s Pi, leaving the JSONL RPC stdin/stdout pipes directly connected to Pi. This requires a usable `pi` command in the user's zsh environment.
 
+On Windows, Pi App starts `pi --mode rpc` directly through the inherited environment. Ensure the `pi` command is available on `PATH` before running `/app`.
+
 ## Platform support
 
-The initial release supports macOS on Apple Silicon (`darwin-arm64`) only. The package contains a prebuilt native application; users do not need Rust, Xcode, Tauri, or a local build step.
+The release contains prebuilt native applications for macOS Apple Silicon (`darwin-arm64`) and Windows x64 (`win32-x64-msvc`). Users do not need Rust, Xcode, Tauri, or a local build step.
 
 ## Development and release
 
-Release artifacts are built by maintainers before publishing:
+Releases are built and published by `.github/workflows/release.yml`. Run it manually from GitHub Actions with a semver version such as `0.1.8`; the workflow updates release metadata, creates the `v0.1.8` tag, builds macOS ARM64, Windows x64, and Linux x64 binaries on native runners, creates a GitHub Release, and publishes the platform packages followed by the root package to npm.
 
-```sh
-npm run build:native
-npm pack --dry-run
-```
-
-The npm tarball contains only the Pi extension, compiled launcher, license/readme, and the prebuilt native bundle for the supported platform.
+The repository requires an `NPM_TOKEN` GitHub Actions secret with permission to publish `pi-native-app` and its platform packages. The npm tarball contains the Pi extension, compiled launcher, license/readme, and the platform-specific prebuilt native bundle selected by npm for the user's operating system and architecture.
