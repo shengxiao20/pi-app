@@ -110,10 +110,10 @@ jobs:
           };
           root.bundledDependencies = Object.keys(root.optionalDependencies);
           fs.writeFileSync('package.json', JSON.stringify(root, null, 2) + '\n');
-      - run: npm publish packages/pi-native-app-darwin-arm64 --access public
+      - run: npm publish ./packages/pi-native-app-darwin-arm64 --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: npm publish packages/pi-native-app-win32-x64-msvc --access public
+      - run: npm publish ./packages/pi-native-app-win32-x64-msvc --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Install published platform packages into root staging tree
