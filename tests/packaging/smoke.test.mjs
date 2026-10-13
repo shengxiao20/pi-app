@@ -62,6 +62,14 @@ test("defines the cross-platform release workflow", () => {
     /test -s packages\/pi-native-app-win32-x64-msvc\/bin\/pi-native-app\.exe/,
   );
   assert.doesNotMatch(workflow, /merge-multiple: true/);
+  assert.doesNotMatch(
+    workflow,
+    /Install published platform packages into root staging tree/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /npm install --ignore-scripts --package-lock=false --no-save/,
+  );
   assert.match(workflow, /npm run build:launcher/);
   assert.match(workflow, /npm publish --ignore-scripts --access public/);
   assert.match(workflow, /Version \$\{RELEASE_VERSION\} is already published/);

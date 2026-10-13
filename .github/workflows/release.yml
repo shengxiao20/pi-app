@@ -138,8 +138,6 @@ jobs:
           }
           publish_platform pi-native-app-darwin-arm64 ./packages/pi-native-app-darwin-arm64
           publish_platform pi-native-app-win32-x64-msvc ./packages/pi-native-app-win32-x64-msvc
-      - name: Install published platform packages into root staging tree
-        run: npm install --ignore-scripts --package-lock=false --no-save
       - run: npm run build:launcher
       - run: npm publish --ignore-scripts --access public
         env:
