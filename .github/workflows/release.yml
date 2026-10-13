@@ -110,15 +110,27 @@ jobs:
           };
           root.bundledDependencies = Object.keys(root.optionalDependencies);
           fs.writeFileSync('package.json', JSON.stringify(root, null, 2) + '\n');
-      - run: npm publish ./packages/pi-native-app-darwin-arm64 --access public
+      - name: Publish a platform package when its version is absent
+        shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: npm publish ./packages/pi-native-app-win32-x64-msvc --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ needs.release-context.outputs.version }}
+        run: |
+          publish_platform() {
+            local package_name="$1"
+            local package_path="$2"
+            if npm view "$package_name@$RELEASE_VERSION" version --json 2>/dev/null | grep -q "\"$RELEASE_VERSION\""; then
+              echo "Version ${RELEASE_VERSION} is already published for ${package_name}."
+              return
+            fi
+            npm publish "$package_path" --access public
+          }
+          publish_platform pi-native-app-darwin-arm64 ./packages/pi-native-app-darwin-arm64
+          publish_platform pi-native-app-win32-x64-msvc ./packages/pi-native-app-win32-x64-msvc
       - name: Install published platform packages into root staging tree
         run: npm install --ignore-scripts --package-lock=false --no-save
-      - run: npm publish --access public
+      - run: npm run build:launcher
+      - run: npm publish --ignore-scripts --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - uses: softprops/action-gh-release@v2
