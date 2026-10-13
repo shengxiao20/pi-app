@@ -11,6 +11,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { PiClient, RpcRecord, SessionProcessEvent } from "./pi-client";
 
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({ svg: "<svg />" }),
+  },
+}));
+
 function createClient() {
   let workspace = {
     id: "workspace-a",
@@ -96,6 +103,30 @@ describe("App workspace boundary", () => {
       expect(document.querySelector(".katex")?.textContent).toContain("答案"),
     );
     expect(document.querySelector(".katex annotation")).toBeTruthy();
+  });
+
+  it("renders Mermaid fenced code as an SVG diagram", async () => {
+    const fake = createClient();
+    fake.client.sessionHistory = vi.fn().mockResolvedValue({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "```mermaid\nflowchart LR\n  A[Bootstrap Agent] --> B[配置 ORD]\n  B --> C[本地运行]\n```",
+            },
+          ],
+        },
+      ],
+      before: 0,
+      hasMore: false,
+    });
+    render(<App client={fake.client} />);
+
+    await waitFor(() =>
+      expect(document.querySelector(".mermaid-diagram svg")).toBeTruthy(),
+    );
   });
 
   it("renders a flattened GitHub Markdown table as an accessible table", async () => {

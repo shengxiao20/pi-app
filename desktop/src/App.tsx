@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useReducer,
   useRef,
@@ -8,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import "katex/dist/katex.min.css";
+import mermaid from "mermaid";
 
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -37,6 +39,8 @@ export type ChatStatus =
   | "completed"
   | "aborted"
   | "failed";
+
+mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
 
 type ChatMessage = {
   kind: "message";
@@ -1362,6 +1366,18 @@ function HistoryEntryView({ entry }: { entry: HistoryEntry }) {
         <strong>{entry.role === "user" ? "You" : "Pi"}</strong>
         <div className="markdown">
           <ReactMarkdown
+            components={{
+              code({ children, className, ...props }) {
+                const language = /language-(\S+)/.exec(className ?? "")?.[1];
+                if (language === "mermaid")
+                  return <MermaidDiagram chart={String(children).trim()} />;
+                return (
+                  <code className={className} {...props}>
+                    {children}
+                  </code>
+                );
+              },
+            }}
             rehypePlugins={[rehypeKatex]}
             remarkPlugins={[remarkGfm, remarkMath]}
           >
@@ -1384,6 +1400,41 @@ function HistoryEntryView({ entry }: { entry: HistoryEntry }) {
       </summary>
       <pre>{entry.output || "Running…"}</pre>
     </details>
+  );
+}
+
+function MermaidDiagram({ chart }: { chart: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const diagramId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+
+  useEffect(() => {
+    let disposed = false;
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.replaceChildren();
+    void mermaid
+      .render(`mermaid-${diagramId}`, chart)
+      .then(({ svg, bindFunctions }) => {
+        if (disposed || !containerRef.current) return;
+        containerRef.current.innerHTML = svg;
+        bindFunctions?.(containerRef.current);
+      })
+      .catch((error: unknown) =>
+        console.error("Could not render Mermaid diagram", error),
+      );
+
+    return () => {
+      disposed = true;
+    };
+  }, [chart, diagramId]);
+
+  return (
+    <div
+      aria-label="Mermaid diagram"
+      className="mermaid-diagram"
+      ref={containerRef}
+    />
   );
 }
 
