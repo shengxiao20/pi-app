@@ -1,6 +1,6 @@
 # Pi Native App
 
-Current release: **0.1.11**.
+Current release: **0.1.12**.
 
 Native desktop client for the [Pi coding-agent harness](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
 

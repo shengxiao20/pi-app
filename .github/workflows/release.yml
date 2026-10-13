@@ -100,10 +100,14 @@ jobs:
         with:
           name: native-windows-x64
           path: packages/pi-native-app-win32-x64-msvc
-      - name: Verify downloaded platform artifacts
+      - name: Restore and verify downloaded platform artifacts
         shell: bash
         run: |
-          test -s packages/pi-native-app-darwin-arm64/bin/pi-native-app
+          chmod +x \
+            packages/pi-native-app-darwin-arm64/bin/pi-native-app \
+            packages/pi-native-app-darwin-arm64/Pi\ App.app/Contents/MacOS/pi-app-desktop
+          test -x packages/pi-native-app-darwin-arm64/bin/pi-native-app
+          test -x packages/pi-native-app-darwin-arm64/Pi\ App.app/Contents/MacOS/pi-app-desktop
           test -s packages/pi-native-app-win32-x64-msvc/bin/pi-native-app.exe
       - name: Prepare npm manifests
         shell: node {0}
