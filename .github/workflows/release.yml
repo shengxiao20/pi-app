@@ -94,9 +94,17 @@ jobs:
           registry-url: https://registry.npmjs.org
       - uses: actions/download-artifact@v4
         with:
-          pattern: native-*
-          merge-multiple: true
-          path: packages
+          name: native-macos-arm64
+          path: packages/pi-native-app-darwin-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-windows-x64
+          path: packages/pi-native-app-win32-x64-msvc
+      - name: Verify downloaded platform artifacts
+        shell: bash
+        run: |
+          test -s packages/pi-native-app-darwin-arm64/bin/pi-native-app
+          test -s packages/pi-native-app-win32-x64-msvc/bin/pi-native-app.exe
       - name: Prepare npm manifests
         shell: node {0}
         env:

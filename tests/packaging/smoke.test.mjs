@@ -32,6 +32,23 @@ test("defines the cross-platform release workflow", () => {
     workflow,
     /publish_platform pi-native-app-win32-x64-msvc \.\/packages\/pi-native-app-win32-x64-msvc/,
   );
+  assert.match(
+    workflow,
+    /name: native-macos-arm64\s+path: packages\/pi-native-app-darwin-arm64/,
+  );
+  assert.match(
+    workflow,
+    /name: native-windows-x64\s+path: packages\/pi-native-app-win32-x64-msvc/,
+  );
+  assert.match(
+    workflow,
+    /test -s packages\/pi-native-app-darwin-arm64\/bin\/pi-native-app/,
+  );
+  assert.match(
+    workflow,
+    /test -s packages\/pi-native-app-win32-x64-msvc\/bin\/pi-native-app\.exe/,
+  );
+  assert.doesNotMatch(workflow, /merge-multiple: true/);
   assert.match(workflow, /npm run build:launcher/);
   assert.match(workflow, /npm publish --ignore-scripts --access public/);
   assert.match(workflow, /Version \$\{RELEASE_VERSION\} is already published/);
