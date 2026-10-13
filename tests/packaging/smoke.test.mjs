@@ -40,9 +40,22 @@ test("defines the cross-platform release workflow", () => {
     workflow,
     /name: native-windows-x64\s+path: packages\/pi-native-app-win32-x64-msvc/,
   );
+  assert.match(workflow, /chmod \+x/);
   assert.match(
     workflow,
-    /test -s packages\/pi-native-app-darwin-arm64\/bin\/pi-native-app/,
+    /packages\/pi-native-app-darwin-arm64\/bin\/pi-native-app\s+\\/,
+  );
+  assert.match(
+    workflow,
+    /packages\/pi-native-app-darwin-arm64\/Pi\\ App\.app\/Contents\/MacOS\/pi-app-desktop/,
+  );
+  assert.match(
+    workflow,
+    /test -x packages\/pi-native-app-darwin-arm64\/bin\/pi-native-app/,
+  );
+  assert.match(
+    workflow,
+    /test -x packages\/pi-native-app-darwin-arm64\/Pi\\ App\.app\/Contents\/MacOS\/pi-app-desktop/,
   );
   assert.match(
     workflow,
