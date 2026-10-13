@@ -37,11 +37,7 @@ test("release metadata and documentation declare one consistent version", () => 
     packageManifest.optionalDependencies["pi-native-app-win32-x64-msvc"],
     /^(?:file:|\d+\.\d+\.\d+)/,
   );
-  assert.ok(
-    packageManifest.bundledDependencies.includes(
-      "pi-native-app-win32-x64-msvc",
-    ),
-  );
+  assert.equal(packageManifest.bundledDependencies, undefined);
 
   const windowsPackage = JSON.parse(
     readFileSync(

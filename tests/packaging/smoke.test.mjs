@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,11 +57,7 @@ test("declares the Windows x64 native package in the release manifest", () => {
     packageManifest.optionalDependencies["pi-native-app-win32-x64-msvc"],
     "file:packages/pi-native-app-win32-x64-msvc",
   );
-  assert.ok(
-    packageManifest.bundledDependencies.includes(
-      "pi-native-app-win32-x64-msvc",
-    ),
-  );
+  assert.equal(packageManifest.bundledDependencies, undefined);
   assert.ok(
     !packageManifest.optionalDependencies["pi-native-app-linux-x64-gnu"],
   );
@@ -101,7 +99,7 @@ test("rebuilds Tauri's embedded frontend assets whenever Vite updates desktop/di
   );
 });
 
-test("packs a clean-installable root package with its current-platform desktop binary", () => {
+test("publishes a root package that installs its current-platform desktop binary", () => {
   const workspace = mkdtempSync(join(tmpdir(), "pi-app-pack-"));
   let tarball;
   try {
@@ -125,25 +123,57 @@ test("packs a clean-installable root package with its current-platform desktop b
       "dist/launcher/index.d.ts",
       "dist/launcher/index.js",
       "extensions/app.ts",
-      "node_modules/pi-native-app-darwin-arm64/Pi App.app/Contents/Info.plist",
-      "node_modules/pi-native-app-darwin-arm64/Pi App.app/Contents/MacOS/pi-app-desktop",
-      "node_modules/pi-native-app-darwin-arm64/Pi App.app/Contents/Resources/icon.icns",
-      "node_modules/pi-native-app-darwin-arm64/Pi App.app/Contents/_CodeSignature/CodeResources",
-      "node_modules/pi-native-app-darwin-arm64/bin/pi-native-app",
-      "node_modules/pi-native-app-darwin-arm64/package.json",
       "package.json",
     ]);
-    execFileSync("npm", ["install", "--ignore-scripts", tarball], {
-      cwd: workspace,
-      stdio: "pipe",
-    });
+    const publishedPackage = join(workspace, "published-package");
+    execFileSync("tar", ["-xzf", tarball, "-C", workspace]);
+    cpSync(join(workspace, "package"), publishedPackage, { recursive: true });
+    const publishedManifestPath = join(publishedPackage, "package.json");
+    const publishedManifest = JSON.parse(
+      readFileSync(publishedManifestPath, "utf8"),
+    );
+    const platformTarball = join(
+      workspace,
+      JSON.parse(
+        execFileSync(
+          "npm",
+          [
+            "pack",
+            "--ignore-scripts",
+            "--json",
+            "--pack-destination",
+            workspace,
+          ],
+          {
+            cwd: join(repositoryRoot, "packages", "pi-native-app-darwin-arm64"),
+            encoding: "utf8",
+          },
+        ),
+      )[0].filename,
+    );
+    publishedManifest.optionalDependencies = {
+      "pi-native-app-darwin-arm64": `file:${platformTarball}`,
+    };
+    writeFileSync(
+      publishedManifestPath,
+      `${JSON.stringify(publishedManifest, null, 2)}\n`,
+    );
+    const publishedTarball = JSON.parse(
+      execFileSync("npm", ["pack", "--ignore-scripts", "--json"], {
+        cwd: publishedPackage,
+        encoding: "utf8",
+      }),
+    )[0].filename;
+    execFileSync(
+      "npm",
+      ["install", "--ignore-scripts", join(publishedPackage, publishedTarball)],
+      { cwd: workspace, stdio: "pipe" },
+    );
 
     const packageName = `${platform()}-${arch()}`;
     assert.equal(packageName, "darwin-arm64");
     const binary = join(
       workspace,
-      "node_modules",
-      "pi-native-app",
       "node_modules",
       "pi-native-app-darwin-arm64",
       "bin",
@@ -152,8 +182,6 @@ test("packs a clean-installable root package with its current-platform desktop b
     assert.ok(existsSync(binary));
     const appBundle = join(
       workspace,
-      "node_modules",
-      "pi-native-app",
       "node_modules",
       "pi-native-app-darwin-arm64",
       "Pi App.app",

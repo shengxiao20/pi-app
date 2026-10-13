@@ -108,7 +108,6 @@ jobs:
             'pi-native-app-darwin-arm64': process.env.RELEASE_VERSION,
             'pi-native-app-win32-x64-msvc': process.env.RELEASE_VERSION,
           };
-          root.bundledDependencies = Object.keys(root.optionalDependencies);
           fs.writeFileSync('package.json', JSON.stringify(root, null, 2) + '\n');
       - name: Publish a platform package when its version is absent
         shell: bash

@@ -1,6 +1,6 @@
 {
   "name": "pi-native-app",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Native desktop client for the Pi coding-agent harness",
   "license": "MIT",
   "repository": {
@@ -34,10 +34,6 @@
     "pi-native-app-darwin-arm64": "file:packages/pi-native-app-darwin-arm64",
     "pi-native-app-win32-x64-msvc": "file:packages/pi-native-app-win32-x64-msvc"
   },
-  "bundledDependencies": [
-    "pi-native-app-darwin-arm64",
-    "pi-native-app-win32-x64-msvc"
-  ],
   "pi": {
     "extensions": [
       "./extensions"

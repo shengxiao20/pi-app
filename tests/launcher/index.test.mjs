@@ -57,7 +57,7 @@ test("resolves a platform binary from a local workspace package", () => {
   );
 });
 
-test("resolves the platform package binary and rejects a missing binary explicitly", () => {
+test("resolves a bundled platform package binary and rejects a missing binary explicitly", () => {
   const packageRoot = mkdtempSync(join(tmpdir(), "pi-app-launcher-"));
   const binaryPath = join(
     packageRoot,
@@ -81,6 +81,30 @@ test("resolves the platform package binary and rejects a missing binary explicit
   assert.throws(
     () => resolveDesktopBinary({ platform: "linux", arch: "x64", packageRoot }),
     /Unsupported Pi App desktop platform: linux-x64/,
+  );
+});
+
+test("resolves a hoisted platform package binary", () => {
+  const packageRoot = join(
+    mkdtempSync(join(tmpdir(), "pi-app-launcher-")),
+    "node_modules",
+    "pi-native-app",
+  );
+  const binaryPath = join(
+    packageRoot,
+    "..",
+    "pi-native-app-darwin-arm64",
+    "bin",
+    "pi-native-app",
+  );
+  mkdirSync(join(packageRoot, "..", "pi-native-app-darwin-arm64", "bin"), {
+    recursive: true,
+  });
+  writeFileSync(binaryPath, "desktop binary");
+
+  assert.equal(
+    resolveDesktopBinary({ platform: "darwin", arch: "arm64", packageRoot }),
+    binaryPath,
   );
 });
 
