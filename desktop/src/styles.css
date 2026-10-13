@@ -722,6 +722,23 @@ h1 {
   margin: 0 0 12px;
 }
 
+.markdown table {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid #b8c2c7;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.markdown th {
+  background: #e4e9ec;
+  font-weight: 700;
+}
+
 .markdown ul,
 .markdown ol {
   padding-left: 24px;
@@ -752,6 +769,18 @@ h1 {
   border: 0;
   color: inherit;
   padding: 0;
+}
+
+.mermaid-diagram {
+  margin: 12px 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.mermaid-diagram svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
 }
 
 .markdown blockquote {
