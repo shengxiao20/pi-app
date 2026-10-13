@@ -22,7 +22,14 @@ test("defines the cross-platform release workflow", () => {
   assert.match(workflow, /macos-14/);
   assert.match(workflow, /windows-latest/);
   assert.doesNotMatch(workflow, /build-linux|pi-native-app-linux/);
-  assert.match(workflow, /npm publish/);
+  assert.match(
+    workflow,
+    /npm publish \.\/packages\/pi-native-app-darwin-arm64 --access public/,
+  );
+  assert.match(
+    workflow,
+    /npm publish \.\/packages\/pi-native-app-win32-x64-msvc --access public/,
+  );
   assert.match(workflow, /softprops\/action-gh-release@v2/);
 
   assert.match(workflow, /workflow_dispatch/);
