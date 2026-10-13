@@ -24,12 +24,15 @@ test("defines the cross-platform release workflow", () => {
   assert.doesNotMatch(workflow, /build-linux|pi-native-app-linux/);
   assert.match(
     workflow,
-    /npm publish \.\/packages\/pi-native-app-darwin-arm64 --access public/,
+    /publish_platform pi-native-app-darwin-arm64 \.\/packages\/pi-native-app-darwin-arm64/,
   );
   assert.match(
     workflow,
-    /npm publish \.\/packages\/pi-native-app-win32-x64-msvc --access public/,
+    /publish_platform pi-native-app-win32-x64-msvc \.\/packages\/pi-native-app-win32-x64-msvc/,
   );
+  assert.match(workflow, /npm run build:launcher/);
+  assert.match(workflow, /npm publish --ignore-scripts --access public/);
+  assert.match(workflow, /Version \$\{RELEASE_VERSION\} is already published/);
   assert.match(workflow, /softprops\/action-gh-release@v2/);
 
   assert.match(workflow, /workflow_dispatch/);
