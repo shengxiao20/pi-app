@@ -70,6 +70,14 @@ test("defines the cross-platform release workflow", () => {
     workflow,
     /npm install --ignore-scripts --package-lock=false --no-save/,
   );
+  assert.match(
+    workflow,
+    /name: Install launcher build dependencies\s+run: npm ci --ignore-scripts --workspaces=false/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /Install published platform packages into root staging tree/,
+  );
   assert.match(workflow, /npm run build:launcher/);
   assert.match(workflow, /npm publish --ignore-scripts --access public/);
   assert.match(workflow, /Version \$\{RELEASE_VERSION\} is already published/);
