@@ -1248,7 +1248,7 @@ textarea::placeholder {
   border: 1px solid transparent;
   color: #4a5664;
   display: inline-flex;
-  gap: 4px;
+  gap: 2px;
   justify-content: center;
   min-height: 26px;
   min-width: 28px;
@@ -1261,12 +1261,12 @@ textarea::placeholder {
 }
 .notification-toggle svg {
   fill: none;
-  height: 15px;
+  height: 18px;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.5;
-  width: 15px;
+  width: 18px;
 }
 .notification-count {
   font-size: 10px;
