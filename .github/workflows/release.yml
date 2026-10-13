@@ -92,6 +92,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
+      - name: Install launcher build dependencies
+        run: npm ci --ignore-scripts --workspaces=false
       - uses: actions/download-artifact@v4
         with:
           name: native-macos-arm64
