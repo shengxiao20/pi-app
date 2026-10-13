@@ -67,19 +67,28 @@ export function resolveDesktopBinary({
     "bin",
     executableName,
   );
-  const installedBinaryPath = join(
+  const bundledBinaryPath = join(
     packageRoot,
     "node_modules",
     packageName,
     "bin",
     executableName,
   );
-  const binaryPath = existsSync(localBinaryPath)
-    ? localBinaryPath
-    : installedBinaryPath;
+  const hoistedBinaryPath = join(
+    packageRoot,
+    "..",
+    packageName,
+    "bin",
+    executableName,
+  );
+  const binaryPath = [
+    localBinaryPath,
+    bundledBinaryPath,
+    hoistedBinaryPath,
+  ].find(existsSync);
 
-  if (!existsSync(binaryPath)) {
-    throw new Error(`Pi App desktop binary is missing: ${binaryPath}`);
+  if (!binaryPath) {
+    throw new Error(`Pi App desktop binary is missing: ${hoistedBinaryPath}`);
   }
 
   return binaryPath;
