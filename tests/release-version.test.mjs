@@ -38,6 +38,8 @@ test("release metadata and documentation declare one consistent version", () => 
     /^(?:file:|\d+\.\d+\.\d+)/,
   );
   assert.equal(packageManifest.bundledDependencies, undefined);
+  assert.ok(packageManifest.keywords.includes("pi-extension"));
+  assert.ok(packageManifest.pi.extensions.includes("./extensions"));
 
   const windowsPackage = JSON.parse(
     readFileSync(
