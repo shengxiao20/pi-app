@@ -1,8 +1,8 @@
 {
   "name": "pi-native-app-win32-x64-msvc",
-  "version": "0.1.13",
+  "version": "0.1.15",
   "private": false,
-  "description": "Pi Native App binary for Windows x64",
+  "description": "Pi Native App binary for Windows x64 / 适用于 Windows x64 的 Pi Native App 二进制包",
   "os": [
     "win32"
   ],

@@ -114,9 +114,8 @@ fn default_session_directory(cwd: &std::path::Path) -> PathBuf {
             .trim_start_matches(['/', '\\'])
             .replace(['/', '\\', ':'], "-")
     );
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .expect("Pi App desktop client requires a HOME directory")
+    dirs::home_dir()
+        .expect("Pi App desktop client requires a user home directory")
         .join(".pi")
         .join("agent")
         .join("sessions")
@@ -410,8 +409,21 @@ fn start_event_forwarder(
 
 #[cfg(test)]
 mod tests {
-    use super::{AppState, CurrentWorkspace};
+    use super::{default_session_directory, AppState, CurrentWorkspace};
     use std::path::PathBuf;
+
+    #[test]
+    fn session_directory_uses_the_platform_home_directory() {
+        let session_directory = default_session_directory(&PathBuf::from("project"));
+
+        assert!(session_directory.starts_with(dirs::home_dir().unwrap()));
+        assert!(session_directory.ends_with(
+            PathBuf::from(".pi")
+                .join("agent")
+                .join("sessions")
+                .join("--project--")
+        ));
+    }
 
     #[test]
     fn canonical_workspace_has_a_stable_opaque_identity() {

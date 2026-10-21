@@ -2610,8 +2610,9 @@ dependencies = [
 
 [[package]]
 name = "pi-app-desktop"
-version = "0.1.13"
+version = "0.1.15"
 dependencies = [
+ "dirs",
  "rfd",
  "rusqlite",
  "serde",

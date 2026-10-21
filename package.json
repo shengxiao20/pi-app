@@ -1,7 +1,7 @@
 {
   "name": "pi-native-app",
-  "version": "0.1.13",
-  "description": "Clean, intuitive Pi desktop client for macOS Apple Silicon and Windows x64, with familiar Pi workflows and easier content copying.",
+  "version": "0.1.15",
+  "description": "Clean, intuitive Pi desktop client for macOS Apple Silicon and Windows x64, with familiar Pi workflows and easier content copying / 简洁直观的 Pi 桌面客户端，适用于 macOS Apple Silicon 和 Windows x64，提供熟悉的 Pi 工作流和更便捷的内容复制。",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -15,6 +15,7 @@
   "type": "module",
   "keywords": [
     "pi-package",
+    "pi-extension",
     "pi",
     "pi-coding-agent",
     "native",
