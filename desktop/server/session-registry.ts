@@ -1,5 +1,17 @@
 import type { Message as AgUiMessage } from "@ag-ui/core";
-import {
+import type {
+  AgentSession,
+  DefaultResourceLoader as DefaultResourceLoaderType,
+  SessionEntry,
+  SessionInfo,
+  SessionManager as SessionManagerType,
+} from "@earendil-works/pi-coding-agent";
+import { realpath } from "node:fs/promises";
+import { basename, relative } from "node:path";
+
+const PI_SDK_SPECIFIER =
+  process.env.PI_APP_PI_SDK_URL ?? "@earendil-works/pi-coding-agent";
+const {
   createAgentSession,
   createCodemodeExtension,
   createMcpExtension,
@@ -8,12 +20,9 @@ import {
   getAgentDir,
   SessionManager,
   SettingsManager,
-  type AgentSession,
-  type SessionEntry,
-  type SessionInfo,
-} from "@earendil-works/pi-coding-agent";
-import { realpath } from "node:fs/promises";
-import { basename, relative } from "node:path";
+} = (await import(
+  PI_SDK_SPECIFIER
+)) as typeof import("@earendil-works/pi-coding-agent");
 
 export type PersistedSession = {
   id: string;
@@ -144,7 +153,7 @@ export class SessionRegistry {
     return toAgUiMessages(manager.getBranch());
   }
 
-  #manager(sessionId: string): SessionManager {
+  #manager(sessionId: string): SessionManagerType {
     const active = this.#sessions.get(sessionId);
     if (active) return active.session.sessionManager;
     const path = SessionManager.findById(this.#cwd, sessionId);
@@ -153,7 +162,7 @@ export class SessionRegistry {
   }
 
   async #createAgent(
-    manager: SessionManager,
+    manager: SessionManagerType,
   ): Promise<{ session: AgentSession; commands: PiCommand[] }> {
     const resourceLoader = new DefaultResourceLoader({
       cwd: this.#cwd,
@@ -180,7 +189,9 @@ export class SessionRegistry {
   }
 }
 
-function resourceCommands(resourceLoader: DefaultResourceLoader): PiCommand[] {
+function resourceCommands(
+  resourceLoader: DefaultResourceLoaderType,
+): PiCommand[] {
   const extensionCommands = resourceLoader
     .getExtensions()
     .extensions.flatMap((extension) =>

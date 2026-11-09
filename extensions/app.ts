@@ -45,6 +45,9 @@ function startServer(cwd: string): void {
       env: {
         ...process.env,
         NODE_ENV: "production",
+        PI_APP_PI_SDK_URL: import.meta.resolve(
+          "@earendil-works/pi-coding-agent",
+        ),
         PI_APP_WORKSPACE: cwd,
         PORT: String(PORT),
       },
