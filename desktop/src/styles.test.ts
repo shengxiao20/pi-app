@@ -88,6 +88,18 @@ describe("desktop layout", () => {
     );
   });
 
+  it("fills the viewport beside a bounded resizable sidebar", () => {
+    expect(styles).toMatch(
+      /grid-template-columns:\s*var\(--sidebar-width, 280px\) 8px minmax\(0, 1fr\)/,
+    );
+    expect(styles).toMatch(
+      /\.sidebar-resize-handle\s*\{[^}]*cursor:\s*col-resize[^}]*touch-action:\s*none/s,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width: 700px\)\s*\{[\s\S]*?\.sidebar-resize-handle\s*\{[^}]*display:\s*none/s,
+    );
+  });
+
   it("keeps the composer in a shrinkable viewport and adapts to narrow displays", () => {
     expect(styles).toMatch(
       /\.app-shell\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)/s,

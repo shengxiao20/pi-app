@@ -136,6 +136,26 @@ describe("App web workspace", () => {
     );
   });
 
+  it("resizes the sidebar within its bounded width", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+    await screen.findAllByText("Session A");
+
+    const separator = screen.getByRole("separator", {
+      name: "Resize sidebar",
+    });
+    expect(separator.getAttribute("aria-valuenow")).toBe("280");
+
+    fireEvent.keyDown(separator, { key: "End" });
+    expect(separator.getAttribute("aria-valuenow")).toBe("520");
+    expect(separator.closest("main")?.getAttribute("style")).toContain(
+      "--sidebar-width: 520px",
+    );
+
+    fireEvent.keyDown(separator, { key: "Home" });
+    expect(separator.getAttribute("aria-valuenow")).toBe("220");
+  });
+
   it("creates a tag with the existing inline control", async () => {
     const fake = createClient();
     fake.client.createTag = vi.fn().mockResolvedValue({ id: 7, name: "Work" });

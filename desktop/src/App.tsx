@@ -6,6 +6,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import "katex/dist/katex.min.css";
@@ -92,6 +93,16 @@ type PointerDrag = {
   isDragging: boolean;
 };
 
+type SidebarResize = {
+  pointerId: number;
+  startWidth: number;
+  startX: number;
+};
+
+const DEFAULT_SIDEBAR_WIDTH = 280;
+const MIN_SIDEBAR_WIDTH = 220;
+const MAX_SIDEBAR_WIDTH = 520;
+const MIN_WORKSPACE_WIDTH = 360;
 const INITIAL_SESSION_ID = "session-initial";
 const HISTORY_PAGE_SIZE = 80;
 
@@ -115,6 +126,10 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   const [newTagName, setNewTagName] = useState("");
   const [creatingTag, setCreatingTag] = useState(false);
   const [dropTargetGroupId, setDropTargetGroupId] = useState<string>();
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    clampSidebarWidth(DEFAULT_SIDEBAR_WIDTH, window.innerWidth),
+  );
+  const sidebarResize = useRef<SidebarResize | undefined>(undefined);
   const pointerDrag = useRef<PointerDrag | undefined>(undefined);
   const pointerDragCleanup = useRef<(() => void) | undefined>(undefined);
   const [notifications, setNotifications] = useState<
@@ -142,6 +157,15 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
 
   const commandDiscovery = useRef<Promise<void> | undefined>(undefined);
   const loadingOlderSessions = useRef(new Set<string>());
+
+  useEffect(() => {
+    function handleViewportResize() {
+      setSidebarWidth((width) => clampSidebarWidth(width, window.innerWidth));
+    }
+
+    window.addEventListener("resize", handleViewportResize);
+    return () => window.removeEventListener("resize", handleViewportResize);
+  }, []);
 
   const startup = useRef<Promise<WorkspaceInitialization> | undefined>(
     undefined,
@@ -629,8 +653,64 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
     setShowCommands(false);
   }
 
+  function beginSidebarResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    sidebarResize.current = {
+      pointerId: event.pointerId,
+      startWidth: sidebarWidth,
+      startX: event.clientX,
+    };
+  }
+
+  function continueSidebarResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    const resize = sidebarResize.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    setSidebarWidth(
+      clampSidebarWidth(
+        resize.startWidth + event.clientX - resize.startX,
+        window.innerWidth,
+      ),
+    );
+  }
+
+  function finishSidebarResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (sidebarResize.current?.pointerId !== event.pointerId) return;
+    sidebarResize.current = undefined;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function resizeSidebarWithKeyboard(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ) {
+    const maximum = sidebarMaximum(window.innerWidth);
+    let nextWidth: number;
+    switch (event.key) {
+      case "ArrowLeft":
+        nextWidth = sidebarWidth - 16;
+        break;
+      case "ArrowRight":
+        nextWidth = sidebarWidth + 16;
+        break;
+      case "Home":
+        nextWidth = MIN_SIDEBAR_WIDTH;
+        break;
+      case "End":
+        nextWidth = maximum;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    setSidebarWidth(clampSidebarWidth(nextWidth, window.innerWidth));
+  }
+
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
       <aside className="sidebar">
         <div className="brand" aria-label="Pi App">
           <span className="brand-mark" aria-hidden="true">
@@ -895,6 +975,24 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
           </section>
         </nav>
       </aside>
+      <button
+        aria-label="Resize sidebar"
+        aria-orientation="vertical"
+        aria-valuemax={sidebarMaximum(window.innerWidth)}
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuenow={sidebarWidth}
+        className="sidebar-resize-handle"
+        onKeyDown={resizeSidebarWithKeyboard}
+        onLostPointerCapture={() => {
+          sidebarResize.current = undefined;
+        }}
+        onPointerCancel={finishSidebarResize}
+        onPointerDown={beginSidebarResize}
+        onPointerMove={continueSidebarResize}
+        onPointerUp={finishSidebarResize}
+        role="separator"
+        type="button"
+      />
       <section className="workspace">
         <header className="workspace-header">
           <div>
@@ -1310,6 +1408,20 @@ function StatusIcon({ status }: { status: string }) {
       </svg>
     );
   return <span aria-label={label} className="session-status is-idle" />;
+}
+
+function sidebarMaximum(viewportWidth: number): number {
+  return Math.max(
+    MIN_SIDEBAR_WIDTH,
+    Math.min(MAX_SIDEBAR_WIDTH, viewportWidth - MIN_WORKSPACE_WIDTH),
+  );
+}
+
+function clampSidebarWidth(width: number, viewportWidth: number): number {
+  return Math.min(
+    sidebarMaximum(viewportWidth),
+    Math.max(MIN_SIDEBAR_WIDTH, width),
+  );
 }
 
 function PlusIcon() {
