@@ -70,6 +70,7 @@ pi
 The command starts the production web service when needed.
 It selects the current Pi directory as the workspace and opens the local URL in your browser.
 The service stays on port `1420` and binds only to `127.0.0.1`.
+To change the workspace, start Pi in the target directory and run `/app` again.
 
 ## Sessions and history
 

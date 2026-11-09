@@ -140,9 +140,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   const workspaceIdRef = useRef<string | undefined>(undefined);
   const sessionsRef = useRef<WorkspaceSession[]>([]);
 
-  const discoveredCommands = useRef<PiCommand[]>([]);
   const commandDiscovery = useRef<Promise<void> | undefined>(undefined);
-  const commandGeneration = useRef(0);
   const loadingOlderSessions = useRef(new Set<string>());
 
   const startup = useRef<Promise<WorkspaceInitialization> | undefined>(
@@ -302,39 +300,6 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
       active = false;
     };
   }, [client]);
-
-  async function changeWorkspace() {
-    if (status === "streaming" || status === "starting") return;
-    try {
-      const selected = await client.chooseWorkspace();
-      if (!selected) return;
-      setStatus("starting");
-      setError(undefined);
-      setDraft("");
-      resetCommandDiscovery();
-      dispatchRuntime({ type: "clear-sessions" });
-      workspaceIdRef.current = undefined;
-      const workspace = await initializeWorkspace(client);
-      workspaceIdRef.current = workspace.id;
-      setDirectory(workspace.directory);
-      setSessions(workspace.sessions);
-      const [nextTags, nextAssignments] = await Promise.all([
-        client.listTags(),
-        client.listSessionTagAssignments(),
-      ]);
-      setTags(nextTags);
-      setAssignments(nextAssignments);
-      notifiedGenerations.current.clear();
-      setNotifications([]);
-      setNotificationsOpen(false);
-      activeSessionIdRef.current =
-        workspace.activeSession?.id ?? INITIAL_SESSION_ID;
-      setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
-      setStatus("ready");
-    } catch (reason) {
-      fail(setError, setStatus, reason);
-    }
-  }
 
   async function assignTag(sessionId: string, tagId: number | null) {
     try {
@@ -639,15 +604,6 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
     }
   }
 
-  function resetCommandDiscovery() {
-    commandGeneration.current += 1;
-    discoveredCommands.current = [];
-    commandDiscovery.current = undefined;
-    setCommands([]);
-    setCommandIndex(0);
-    setShowCommands(false);
-  }
-
   function loadCommands(): Promise<void> {
     if (commandDiscovery.current) return commandDiscovery.current;
     if (!activeSession) {
@@ -655,16 +611,10 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
         new Error("Select a session before loading commands"),
       );
     }
-    const generation = commandGeneration.current;
     commandDiscovery.current = client
       .listCommands(activeSession.id)
-      .then((availableCommands) => {
-        if (generation !== commandGeneration.current) return;
-        discoveredCommands.current = availableCommands;
-        setCommands(availableCommands);
-      })
+      .then(setCommands)
       .catch((reason) => {
-        if (generation !== commandGeneration.current) return;
         commandDiscovery.current = undefined;
         fail(setError, setStatus, reason);
       });
@@ -741,17 +691,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
             className="workspace-heading"
             aria-labelledby="workspace-heading"
           >
-            <div className="project-heading">
-              <h2 id="workspace-heading">Workspace</h2>
-              <button
-                className="change-workspace"
-                disabled={status === "starting"}
-                onClick={() => void changeWorkspace()}
-                type="button"
-              >
-                Change workspace
-              </button>
-            </div>
+            <h2 id="workspace-heading">Workspace</h2>
             <p className="current-directory" title={directory}>
               {directory || "No workspace selected"}
             </p>

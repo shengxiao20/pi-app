@@ -18,15 +18,14 @@ vi.mock("mermaid", () => ({
 }));
 
 function createClient() {
-  let workspace = { id: "workspace-a", path: "/workspace/a", displayName: "a" };
-  const sessions = {
-    "workspace-a": [
-      { id: "a-session", path: "/sessions/a.jsonl", title: "Session A" },
-    ],
-    "workspace-b": [
-      { id: "b-session", path: "/sessions/b.jsonl", title: "Session B" },
-    ],
+  const workspace = {
+    id: "workspace-a",
+    path: "/workspace/a",
+    displayName: "a",
   };
+  const sessions = [
+    { id: "a-session", path: "/sessions/a.jsonl", title: "Session A" },
+  ];
   const client: PiClient = {
     createSession: vi.fn().mockResolvedValue({
       id: "new-session",
@@ -34,10 +33,6 @@ function createClient() {
       title: "new-session",
     }),
     currentWorkspace: vi.fn().mockImplementation(async () => workspace),
-    chooseWorkspace: vi.fn().mockImplementation(async () => {
-      workspace = { id: "workspace-b", path: "/workspace/b", displayName: "b" };
-      return workspace;
-    }),
     runAgent: vi
       .fn()
       .mockImplementation(async (sessionId, _prompt, handler) => {
@@ -83,11 +78,7 @@ function createClient() {
     abortSession: vi.fn().mockResolvedValue(undefined),
     renameSession: vi.fn().mockResolvedValue(undefined),
     listCommands: vi.fn().mockResolvedValue([]),
-    listSessions: vi
-      .fn()
-      .mockImplementation(
-        async () => sessions[workspace.id as keyof typeof sessions],
-      ),
+    listSessions: vi.fn().mockResolvedValue(sessions),
     listTags: vi.fn().mockResolvedValue([]),
     createTag: vi.fn(),
     renameTag: vi.fn(),
@@ -135,24 +126,14 @@ describe("App web workspace", () => {
 
     expect((await screen.findAllByText("Session A")).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "Workspace" })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Change workspace" }),
+    ).toBeNull();
     expect(fake.client.sessionHistory).toHaveBeenCalledWith(
       "a-session",
       Number.MAX_SAFE_INTEGER,
       80,
     );
-  });
-
-  it("replaces sessions after the server changes workspace", async () => {
-    const fake = createClient();
-    render(<App client={fake.client} />);
-    await screen.findAllByText("Session A");
-
-    fireEvent.click(screen.getByRole("button", { name: "Change workspace" }));
-
-    await waitFor(() =>
-      expect(screen.getAllByText("Session B").length).toBeGreaterThan(0),
-    );
-    expect(screen.queryAllByText("Session A")).toHaveLength(0);
   });
 
   it("creates a tag with the existing inline control", async () => {

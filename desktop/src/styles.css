@@ -154,14 +154,7 @@ textarea:focus-visible {
   overflow-y: auto;
 }
 
-.project-heading {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.project-heading h2 {
+.workspace-heading h2 {
   color: #66707d;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
@@ -286,22 +279,6 @@ textarea:focus-visible {
 }
 
 .project-actions button:hover {
-  background: #e0e6e9;
-}
-
-.change-workspace {
-  background: transparent;
-  border: 1px solid #bdbbb5;
-  color: #4a5664;
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
-  letter-spacing: 0.04em;
-  padding: 5px;
-  text-transform: uppercase;
-  width: fit-content;
-}
-
-.change-workspace:not(:disabled):hover {
   background: #e0e6e9;
 }
 

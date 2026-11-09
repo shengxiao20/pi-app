@@ -34,7 +34,6 @@ export type PiCommand = {
 export interface PiClient {
   createSession(): Promise<PersistedSession>;
   currentWorkspace(): Promise<CurrentWorkspace>;
-  chooseWorkspace(path?: string): Promise<CurrentWorkspace | null>;
   runAgent(
     sessionId: string,
     prompt: string,
@@ -66,15 +65,6 @@ export type PersistedSession = {
 export const webPiClient: PiClient = {
   createSession: () => request("/api/sessions", { method: "POST" }),
   currentWorkspace: () => request("/api/workspace"),
-  chooseWorkspace: (path) => {
-    const selected =
-      path ?? window.prompt("Enter the absolute workspace directory");
-    if (!selected) return Promise.resolve(null);
-    return request("/api/workspace", {
-      method: "PUT",
-      body: JSON.stringify({ path: selected }),
-    });
-  },
   runAgent: async (sessionId, prompt, handler) => {
     const messages = await request<Message[]>(
       `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
