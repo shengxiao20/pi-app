@@ -75,9 +75,8 @@ textarea:focus-visible {
 }
 
 .sidebar-resize-handle {
-  background: rgba(249, 248, 245, 0.94);
-  border-left: 1px solid #bdbbb5;
-  border-right: 1px solid #bdbbb5;
+  background: transparent;
+  border: 0;
   cursor: col-resize;
   padding: 0;
   position: relative;
@@ -87,17 +86,20 @@ textarea:focus-visible {
 }
 
 .sidebar-resize-handle::after {
-  background: #8da4b6;
+  background: #bdbbb5;
+  bottom: 0;
   content: "";
-  inset: 0 2px;
-  opacity: 0;
+  left: 50%;
   position: absolute;
-  transition: opacity 120ms ease;
+  top: 0;
+  transform: translateX(-50%);
+  transition: background 120ms ease;
+  width: 1px;
 }
 
 .sidebar-resize-handle:hover::after,
 .sidebar-resize-handle:focus-visible::after {
-  opacity: 1;
+  background: #4f799b;
 }
 
 .brand {

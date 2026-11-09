@@ -96,6 +96,12 @@ describe("desktop layout", () => {
       /\.sidebar-resize-handle\s*\{[^}]*cursor:\s*col-resize[^}]*touch-action:\s*none/s,
     );
     expect(styles).toMatch(
+      /\.sidebar-resize-handle::after\s*\{[^}]*left:\s*50%[^}]*width:\s*1px/s,
+    );
+    expect(styles).not.toMatch(
+      /\.sidebar-resize-handle\s*\{[^}]*(border-left|border-right):/s,
+    );
+    expect(styles).toMatch(
       /@media \(max-width: 700px\)\s*\{[\s\S]*?\.sidebar-resize-handle\s*\{[^}]*display:\s*none/s,
     );
   });
