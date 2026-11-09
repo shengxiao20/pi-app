@@ -56,7 +56,7 @@ textarea:focus-visible {
     6px 6px,
     6px 6px;
   display: grid;
-  grid-template-columns: var(--sidebar-width, 280px) 8px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 280px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   inset: 0;
   overflow: hidden;
@@ -77,9 +77,12 @@ textarea:focus-visible {
 .sidebar-resize-handle {
   background: transparent;
   border: 0;
+  bottom: 0;
   cursor: col-resize;
+  left: calc(var(--sidebar-width, 280px) - 4px);
   padding: 0;
-  position: relative;
+  position: absolute;
+  top: 0;
   touch-action: none;
   width: 8px;
   z-index: 2;
@@ -95,6 +98,10 @@ textarea:focus-visible {
   transform: translateX(-50%);
   transition: background 120ms ease;
   width: 1px;
+}
+
+.sidebar-resize-handle:focus-visible {
+  outline: none;
 }
 
 .sidebar-resize-handle:hover::after,

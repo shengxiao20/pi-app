@@ -90,13 +90,16 @@ describe("desktop layout", () => {
 
   it("fills the viewport beside a bounded resizable sidebar", () => {
     expect(styles).toMatch(
-      /grid-template-columns:\s*var\(--sidebar-width, 280px\) 8px minmax\(0, 1fr\)/,
+      /grid-template-columns:\s*var\(--sidebar-width, 280px\) minmax\(0, 1fr\)/,
     );
     expect(styles).toMatch(
-      /\.sidebar-resize-handle\s*\{[^}]*cursor:\s*col-resize[^}]*touch-action:\s*none/s,
+      /\.sidebar-resize-handle\s*\{[^}]*left:\s*calc\(var\(--sidebar-width, 280px\) - 4px\)[^}]*position:\s*absolute[^}]*width:\s*8px/s,
     );
     expect(styles).toMatch(
-      /\.sidebar-resize-handle::after\s*\{[^}]*left:\s*50%[^}]*width:\s*1px/s,
+      /\.sidebar-resize-handle::after\s*\{[^}]*left:\s*50%[^}]*transform:\s*translateX\(-50%\)[^}]*width:\s*1px/s,
+    );
+    expect(styles).toMatch(
+      /\.sidebar-resize-handle:focus-visible\s*\{[^}]*outline:\s*none/s,
     );
     expect(styles).not.toMatch(
       /\.sidebar-resize-handle\s*\{[^}]*(border-left|border-right):/s,
