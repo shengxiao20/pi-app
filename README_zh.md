@@ -1,78 +1,115 @@
-# Pi Native App（中文）
+# Pi App
 
 [English](README.md)
-当前版本：**0.1.15**。
-这是 [Pi coding-agent harness](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) 的原生桌面客户端。
-Pi Native App 是一个 Pi Package，而不是独立的 Agent 运行时。
-`/app` 扩展会在当前项目目录中启动原生桌面客户端。
-桌面客户端会为该项目启动自己的独立 Pi RPC 会话。
-## 安装
+
+Pi App 是 [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) 的本机 Web 客户端。
+它保留现有 React 页面，并使用 AG-UI 1.0 连接浏览器和本机 Node.js 服务。
+服务在进程内使用 Pi TypeScript SDK，不再启动 `pi --mode rpc`。
+
+## 架构
+
+```text
+React 页面
+  -> @ag-ui/client HttpAgent
+    -> 127.0.0.1 上的 HTTP 和服务器发送事件
+      -> AG-UI 适配器
+        -> Pi AgentSession 和 SessionManager
+```
+
+AG-UI 传输运行输入、流式文本、工具调用、工具结果、取消和错误。
+普通 HTTP API 处理工作区、历史分页、会话名称、命令和标签。
+Pi 会话始终是对话历史和模型上下文的权威来源。
+
+服务通过 `DefaultResourceLoader` 加载 Pi 资源。
+服务显式启用 codemode、工具搜索和模型上下文协议（MCP）扩展。
+浏览器可通过会话命令 API 获取扩展命令、提示词模板和 Skills。
+
+## 要求
+
+- Node.js 22 或更高版本
+- 已配置的 Pi 模型和凭据
+
+服务读取 `~/.pi` 下的标准 Pi 配置。
+服务具有启动用户的本机文件权限。
+
+## 开发
+
+```sh
+npm install
+npm run dev
+```
+
+打开 <http://127.0.0.1:1420>。
+初始工作区是运行命令时的目录。
+你也可以通过 `PI_APP_WORKSPACE` 指定工作区。
+
+提交变更前运行：
+
+```sh
+npm test
+npm run typecheck
+npm run lint
+npm run build
+npm run format:check
+```
+
+## 作为 Pi 包使用
+
+安装此包，在项目目录中启动 Pi，然后运行 `/app`：
+
 ```sh
 pi install npm:pi-native-app
-```
-## 使用
-从要工作的项目启动 Pi，然后运行 `/app`：
-```sh
 cd /path/to/project
 pi
 ```
-扩展会等待活动 Agent 结束，然后使用当前项目目录启动原生应用。
-终端 Pi 进程仍保持活动；桌面端会启动独立的 Pi RPC 会话。
-## 当前工作区、会话和标签
-`/app` 不会接管终端中的活动对话。
-Pi App 在任意时刻只显示**一个规范的当前工作区**：从 `/app` 继承的目录，或通过 Pi App 标题旁的 **Change workspace** 选择的目录。
-切换工作区会替换可见会话列表；它绝不会将侧边栏变成其他目录的目录册，也不会隐式停止或中止活动会话。
-Pi 负责 JSONL 会话持久化。
-Pi App 只读取当前工作区的已持久化对话，并且仅在会话首次需要发送工作时启动专用 Pi RPC 子进程。
-导航期间会话可以在后台继续；每个进程都通过其 session ID 和 instance ID 识别，因此其事件只会到达该会话。
-侧边栏按一个可选标签分组会话，另有固定的 **Uncategorized** 组。
-标签和归属是以规范工作区路径和 Pi session ID 为键的应用私有 SQLite 元数据。
-标签名称必须非空且唯一。
-删除标签只会删除其元数据归属，并立即将会话返回 Uncategorized：Pi App 从不删除、迁移或写入 Pi JSONL 会话文件或旧版 `projects.json` 目录。
-非当前会话完成、失败或中止时，Pi App 会创建内存中的通知。
-灯泡控件显示未读数量，并打开可跳转到相应会话的条目。
-这些通知不是系统通知，也不会在应用重启后保留。
-每个会话都拥有自己的草稿、运行时状态、错误、流式输出、工具和未读状态。
-后台输出会获得可访问的未读标记而不抢占焦点；选择该会话会清除标记，同时保留其终端状态。
-在编辑框中输入 `/` 可发现活动 Pi RPC 工作区的扩展命令、提示模板和 Skills。
-筛选可访问列表后，使用方向键和 Enter，或点击命令以插入 `/<name> `；提交时使用 Pi 现有的 `prompt` RPC 执行。
-内置交互式 TUI 命令被有意排除，因为 Pi RPC 不暴露它们。
-在活动 Pi 运行期间，对话会显示工作指示器，直到 Pi 发出 `agent_settled`。
-工具条目显示其实时状态和 Pi 提供的目标上下文：`read`、`edit`、`write` 显示路径，`bash` 显示命令。
-Pi 未提供目标时，Pi App 不会推断或编造目标。
-Pi App 通过 Tauri 的字节游标尾部读取器，从最新的 80 条消息页向前读取已持久化的 JSONL 历史。
-会话存在更早记录时，选择 **Load earlier messages** 以获取下一页。
-每个已加载页面都会直接渲染；前端不维护第二层虚拟化。
-审阅会话时，使用对话标题中的 **Hide tool calls** 仅显示用户和 Pi 文本；该切换只改变展示，不修改持久化历史。
-通过 Pi RPC 发现的扩展命令会按其自身生命周期处理。
-未启动 Agent 运行便完成的命令，在 Pi 接受后会将编辑框恢复为就绪状态；Pi `notify` 扩展 UI 事件会作为 Pi 消息出现在活动对话中。
-自动从终端续接到桌面端需要显式的交接功能。
-它有意不属于 `/app`，因此尚未创建 JSONL 文件的全新终端会话始终可以打开 Pi App。
-## 工作区选择
-从 `/app` 或终端启动的 Pi App 会继承该进程的当前工作目录。
-直接从 Finder 或 Dock 打开 Pi App 时，会先提示选择工作区目录。
-如果取消选择器，Pi App 会显示 **Select a workspace to start Pi.**，并且不会启动 Pi。
-**Change workspace** 会替换这个唯一可见的工作区；它不会将此前选择的目录显示为导航条目。
-Pi 负责会话持久化。
-Pi App 会根据所选规范工作区计算 Pi 的工作区会话目录，并仅将其作为文档化的启动选项传递：
+
 ```text
-pi --mode rpc --session-dir <Pi project session directory> [--session <Pi session JSONL path>]
+/app
 ```
-没有现有会话目录的工作区会以无会话状态启动；RPC 进程启动时，Pi 会创建该目录和新会话。
-Pi 的 RPC 命令可以切换会话，但 Pi App 不会将该全局切换用于侧边栏导航。
-每个活动会话都有自己的 Pi RPC 进程，该进程在工作区 cwd 中启动并直接绑定到该会话。
-Finder 和 Dock 不会继承终端的 `PATH`。
-在 macOS 上，Pi App 通过用户的 zsh 登录/交互环境启动相同的文档化命令。
-这使通过 npm/NVM 安装的 `pi` 及其 Node 解释器可用；zsh 会立即 `exec` Pi，使 JSONL RPC stdin/stdout 管道直接连接到 Pi。
-这要求用户的 zsh 环境中存在可用的 `pi` 命令。
-在 Windows 上，Pi App 通过继承的环境直接启动 `pi --mode rpc`。
-运行 `/app` 前，请确保 `pi` 命令可在 `PATH` 中使用。
-## 平台支持
-发行版包含适用于 macOS Apple Silicon (`darwin-arm64`) 和 Windows x64 (`win32-x64-msvc`) 的预构建原生应用。
-用户不需要 Rust、Xcode、Tauri 或本地构建步骤。
-## 开发和发布
-在本地更新每个版本字段，并通过常规 PR 合入该版本提升。
-然后从 GitHub Actions 手动运行 **Publish Pi Native App release**。
-它会读取合入后的 `main` 版本，在原生 runner 上构建 macOS ARM64 和 Windows x64 二进制，创建 GitHub Release 和匹配的 `v<version>` 标签，并按顺序向 npm 发布平台包和根包。
-仓库需要一个具有发布 `pi-native-app` 及其平台包权限的 `NPM_TOKEN` GitHub Actions secret。
-npm tarball 包含 Pi 扩展、已编译 launcher、许可证/README，以及 npm 为用户操作系统和架构选择的平台专属预构建原生 bundle。
+
+命令会按需启动生产 Web 服务，选择当前 Pi 目录，并在浏览器中打开页面。
+服务固定使用端口 `1420`，且只绑定 `127.0.0.1`。
+
+## 会话和历史
+
+Pi App 只列出当前规范工作区中的会话。
+`SessionManager` 打开并继续 Pi 持久化的 JSONL 会话。
+新的空会话在第一条用户消息之前只保留在内存中。这与 Pi SDK 的持久化规则一致。
+
+每次 AG-UI 运行都发送完整且有序的消息历史。
+运行开始前，服务会将该历史与 Pi 当前会话分支比较。
+如果历史不一致，服务会明确拒绝请求，不会重复追加或静默使用另一份上下文。
+
+历史 API 每页最多返回 200 条消息。
+页面保留现有 Markdown、数学公式、Mermaid 和工具调用显示。
+标签保存在 `~/.pi/agent/pi-app.json`，不会修改 Pi 会话文件。
+
+## 运行结果
+
+- 正常完成发送带成功结果的 `RUN_FINISHED`。
+- 用户取消发送带取消结果的 `RUN_FINISHED`。
+- 运行失败发送 `RUN_ERROR`。
+- 浏览器断线不会被视为成功或取消。Pi 运行会在服务端继续。
+
+任何运行处于活动状态时，服务会拒绝切换工作区。
+服务也会拒绝同一会话的并发运行。
+
+## 本机安全边界
+
+服务只监听 IPv4 回环地址。
+API 拒绝来自其他浏览器来源的请求。
+会话 ID 只能通过 Pi 的当前工作区会话目录解析。
+静态文件只能从 `desktop/dist` 读取。
+
+此边界只适用于单个本机用户。Pi App 不是多用户或网络服务。
+
+## 生产构建
+
+```sh
+npm run build
+npm start
+```
+
+生产服务从同一回环来源提供 `desktop/dist` 和 API。
+npm 包包含构建后的页面、Node.js 服务和 `/app` 扩展。
+它不再包含 Tauri、Rust 二进制文件、平台包或 Pi RPC 启动器。

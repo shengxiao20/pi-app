@@ -1,3 +1,4 @@
+import { EventType } from "@ag-ui/core";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -5,17 +6,35 @@ import {
   isSessionInteractive,
   workspaceReducer,
 } from "./workspace-state";
+import type { SessionProcessEvent } from "./pi-client";
 
 function session(id: string) {
   return { id, title: id, sessionPath: `/${id}.jsonl` };
 }
 
-function event(sessionId: string, instanceId: number, type: string) {
-  return { workspaceId: "workspace-a", sessionId, instanceId, event: { type } };
+function started(sessionId: string, runId = "run-1"): SessionProcessEvent {
+  return {
+    sessionId,
+    runId,
+    event: { type: EventType.RUN_STARTED, threadId: sessionId, runId },
+  };
+}
+
+function finished(sessionId: string, runId = "run-1"): SessionProcessEvent {
+  return {
+    sessionId,
+    runId,
+    event: {
+      type: EventType.RUN_FINISHED,
+      threadId: sessionId,
+      runId,
+      outcome: { type: "success" },
+    },
+  };
 }
 
 describe("workspaceReducer", () => {
-  it("keeps runtime state isolated by session", () => {
+  it("keeps AG-UI run state isolated by session", () => {
     let state = createWorkspaceState();
     state = workspaceReducer(state, {
       type: "ensure-session",
@@ -28,7 +47,7 @@ describe("workspaceReducer", () => {
     state = workspaceReducer(state, {
       type: "process-event",
       active: "b",
-      event: event("a", 1, "message_update"),
+      event: started("a"),
     });
 
     expect(state.sessions.a.status).toBe("streaming");
@@ -36,16 +55,15 @@ describe("workspaceReducer", () => {
     expect(state.sessions.b.status).toBe("idle");
   });
 
-  it("ignores an event for a session that has not been registered", () => {
+  it("ignores events for sessions outside the visible workspace", () => {
     const state = workspaceReducer(createWorkspaceState(), {
       type: "process-event",
-      event: event("old-workspace-session", 1, "message_update"),
+      event: started("old-workspace-session"),
     });
-
     expect(state).toEqual(createWorkspaceState());
   });
 
-  it("ignores stale events from an older process instance", () => {
+  it("ignores terminal events from an older run", () => {
     let state = createWorkspaceState();
     state = workspaceReducer(state, {
       type: "ensure-session",
@@ -54,16 +72,16 @@ describe("workspaceReducer", () => {
     state = workspaceReducer(state, {
       type: "process-event",
       active: "a",
-      event: event("a", 2, "agent_settled"),
+      event: started("a", "run-2"),
     });
     state = workspaceReducer(state, {
       type: "process-event",
       active: "a",
-      event: event("a", 1, "message_update"),
+      event: finished("a", "run-1"),
     });
 
-    expect(state.sessions.a.status).toBe("completed");
-    expect(state.sessions.a.instanceId).toBe(2);
+    expect(state.sessions.a.status).toBe("streaming");
+    expect(state.sessions.a.runId).toBe("run-2");
   });
 
   it("selecting a completed session clears unread and returns it to idle", () => {
@@ -75,10 +93,9 @@ describe("workspaceReducer", () => {
     state = workspaceReducer(state, {
       type: "process-event",
       active: "b",
-      event: event("a", 1, "agent_settled"),
+      event: finished("a"),
     });
     state = workspaceReducer(state, { type: "select-session", sessionId: "a" });
-
     expect(state.sessions.a).toMatchObject({ status: "idle", unread: false });
   });
 
@@ -97,7 +114,7 @@ describe("workspaceReducer", () => {
       sessionId: "a",
       status: "streaming",
     });
-
+    expect(isSessionInteractive(undefined)).toBe(false);
     expect(isSessionInteractive(state.sessions.a)).toBe(false);
     expect(isSessionInteractive(state.sessions.b)).toBe(true);
   });
