@@ -58,6 +58,13 @@ export function isSessionInteractive(
   );
 }
 
+export function canCreateSession(
+  status: SessionStatus,
+  session: WorkspaceSession | undefined,
+): boolean {
+  return session ? isSessionInteractive(session) : status === "ready";
+}
+
 export function createWorkspaceState(): WorkspaceState {
   return { sessions: {} };
 }

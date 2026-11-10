@@ -37,7 +37,8 @@ These figures are PR diff line counts, not a measurement of total source code or
 ## Start here
 
 You need Node.js 22.19 or later, plus configured Pi models and credentials.
-The server uses `--experimental-strip-types`. Configure model access in Pi before you submit a model request.
+The source server uses `--experimental-strip-types`. npm-installed packages start a bundled JavaScript server.
+Configure model access in Pi before you submit a model request.
 
 ### Run from source
 
@@ -345,8 +346,13 @@ Sources: [image persistence](desktop/server/clipboard-images.ts),
 
 Sessions belong to the current canonical workspace path. Pi App lists and opens persisted Pi JSONL sessions with `SessionManager`.
 An empty new session has an allocated path but does not appear in persisted listings until Pi writes it.
-Different sessions can run concurrently. The service rejects concurrent runs for one session and workspace changes during any run.
+Different sessions can run concurrently. The service rejects concurrent runs for one session and workspace changes during workspace-scoped work.
 Switching the displayed session does not cancel server execution.
+
+The folder button beside the workspace path opens the operating system's directory chooser on macOS and Windows.
+Cancel keeps the current workspace. Confirming a folder replaces the server's active workspace and loads that folder's sessions and tag assignments.
+The service rejects the switch while workspace-scoped requests or agent runs remain active, then locks workspace requests until the switch finishes.
+Pages opened for a different workspace receive HTTP 409 instead of silently using the new workspace's sessions.
 
 The history API returns active-branch Pi messages, with at most 200 messages per page.
 The browser loads recent messages first and requests older pages when needed.
@@ -370,26 +376,27 @@ Sources: [history and canonical projection](desktop/server/session-registry.ts),
 
 All paths below are relative to the local service origin. JSON errors have the shape `{ "message": "..." }`.
 
-| Method and path                                  | Purpose                                         | Successful response                       |
-| ------------------------------------------------ | ----------------------------------------------- | ----------------------------------------- |
-| `GET /api/health`                                | Service health, not model authentication        | `200 { service: "pi-app", status: "ok" }` |
-| `GET /api/workspace`                             | Current workspace                               | `200 { id, path, displayName }`           |
-| `PUT /api/workspace`                             | Select `{ path }`                               | `200` workspace object                    |
-| `GET /api/sessions`                              | List persisted sessions                         | `200` session array                       |
-| `POST /api/sessions`                             | Create a session                                | `201 { id, path, title }`                 |
-| `PATCH /api/sessions/:id`                        | Rename with `{ name }`                          | `204`                                     |
-| `GET /api/sessions/:id/history?before=N&limit=N` | Page Pi messages; default limit 80, maximum 200 | `200 { messages, before, hasMore }`       |
-| `GET /api/sessions/:id/messages`                 | Complete canonical AG-UI projection             | `200` message array                       |
-| `GET /api/sessions/:id/commands`                 | Discover extension, prompt, and skill commands  | `200 { name, description?, source }[]`    |
-| `POST /api/agent`                                | Submit `RunAgentInput`                          | `200 text/event-stream`                   |
-| `POST /api/sessions/:id/abort`                   | Ask Pi to abort                                 | `204`; run outcome travels on SSE         |
-| `POST /api/clipboard-images`                     | Save raw image bytes                            | `201 { path }`                            |
-| `GET /api/tags`                                  | List tags                                       | `200` tag array                           |
-| `POST /api/tags`                                 | Create with `{ name }`                          | `201 { id, name }`                        |
-| `PATCH /api/tags/:id`                            | Rename with `{ name }`                          | `200` tag object                          |
-| `DELETE /api/tags/:id`                           | Delete tag and assignments                      | `204`                                     |
-| `GET /api/session-tags`                          | Current workspace assignments                   | `200 { sessionId, tagId }[]`              |
-| `PUT /api/session-tags/:id`                      | Assign `{ tagId }`; `null` removes assignment   | `204`                                     |
+| Method and path                                  | Purpose                                         | Successful response                        |
+| ------------------------------------------------ | ----------------------------------------------- | ------------------------------------------ |
+| `GET /api/health`                                | Service health, not model authentication        | `200 { service: "pi-app", status: "ok" }`  |
+| `GET /api/workspace`                             | Current workspace                               | `200 { id, path, displayName }`            |
+| `POST /api/workspace/select`                     | Open the native folder chooser and switch       | `200` workspace object; `204` if cancelled |
+| `PUT /api/workspace`                             | Select `{ path }`                               | `200` workspace object                     |
+| `GET /api/sessions`                              | List persisted sessions                         | `200` session array                        |
+| `POST /api/sessions`                             | Create a session                                | `201 { id, path, title }`                  |
+| `PATCH /api/sessions/:id`                        | Rename with `{ name }`                          | `204`                                      |
+| `GET /api/sessions/:id/history?before=N&limit=N` | Page Pi messages; default limit 80, maximum 200 | `200 { messages, before, hasMore }`        |
+| `GET /api/sessions/:id/messages`                 | Complete canonical AG-UI projection             | `200` message array                        |
+| `GET /api/sessions/:id/commands`                 | Discover extension, prompt, and skill commands  | `200 { name, description?, source }[]`     |
+| `POST /api/agent`                                | Submit `RunAgentInput`                          | `200 text/event-stream`                    |
+| `POST /api/sessions/:id/abort`                   | Ask Pi to abort                                 | `204`; run outcome travels on SSE          |
+| `POST /api/clipboard-images`                     | Save raw image bytes                            | `201 { path }`                             |
+| `GET /api/tags`                                  | List tags                                       | `200` tag array                            |
+| `POST /api/tags`                                 | Create with `{ name }`                          | `201 { id, name }`                         |
+| `PATCH /api/tags/:id`                            | Rename with `{ name }`                          | `200` tag object                           |
+| `DELETE /api/tags/:id`                           | Delete tag and assignments                      | `204`                                      |
+| `GET /api/session-tags`                          | Current workspace assignments                   | `200 { sessionId, tagId }[]`               |
+| `PUT /api/session-tags/:id`                      | Assign `{ tagId }`; `null` removes assignment   | `204`                                      |
 
 Keep these boundaries separate:
 
@@ -397,7 +404,7 @@ Keep these boundaries separate:
 - **After SSE starts:** prompt rejection and recorded extension errors produce `RUN_ERROR` inside the HTTP 200 response.
 - **Independent HTTP routes:** image-save and metadata errors return JSON errors, not AG-UI run events.
 
-The router returns `403` for a disallowed API origin and `409` for active-run conflicts.
+The router returns `403` for a disallowed API origin and `409` for active-run, workspace-lock, or stale-workspace conflicts.
 Unhandled validation errors currently return `500`, including malformed images and oversized uploads.
 They do not currently use specialized `400`, `413`, or `415` responses.
 Unknown API routes return `404`.
@@ -456,7 +463,7 @@ npm run build
 npm run format:check
 ```
 
-Tests cover history validation, event mapping, extension feedback, clipboard persistence/insertion, client APIs, workspace state, and React behavior.
+Tests cover history validation, event mapping, extension feedback, clipboard persistence/insertion, Windows file paths and launch commands, cross-drive containment, client APIs, workspace state, and React behavior.
 The event-map tests cover its scenario controls, documented mappings, and offline structure.
 Automated tests do not replace manual browser paste, layout, or terminal-extension checks.
 
@@ -466,7 +473,7 @@ Inspect the package before publishing:
 npm pack --dry-run
 ```
 
-`prepack` builds the frontend. The package includes built HTML/assets, server modules, the shared notification contract, and the `/app` extension.
+`prepack` builds the frontend and a JavaScript server entry. The package includes built HTML/assets, the server bundle and sources, the shared notification contract, and the `/app` extension.
 It requires the host Pi SDK through its peer dependency.
 It does not include Tauri, Rust binaries, platform installers, or a Pi RPC launcher.
 
@@ -474,12 +481,18 @@ It does not include Tauri, Rust binaries, platform installers, or a Pi RPC launc
 | -------------------------------------- | --------------------------------------------------- |
 | `extensions/app.ts`                    | Pi `/app` launcher                                  |
 | `desktop/server/index.ts`              | HTTP routing, SSE lifecycle, static serving         |
+| `desktop/server-build/index.js`        | JavaScript server entry for npm-installed packages  |
+| `desktop/server/app-runtime.ts`        | Cross-platform package and process launch helpers   |
+| `desktop/server/path-safety.ts`        | Platform-aware filesystem containment checks        |
 | `desktop/server/agui-adapter.ts`       | Input/history checks and event translation          |
 | `desktop/server/session-registry.ts`   | Pi session lifecycle, resources, canonical messages |
+| `desktop/server/workspace-access.ts`   | Exclusive workspace changes and request guards      |
+| `desktop/server/workspace-picker.ts`   | Native macOS and Windows folder dialogs             |
 | `desktop/server/extension-feedback.ts` | Extension notifications and explicit UI errors      |
 | `desktop/server/clipboard-images.ts`   | Validated temporary image persistence               |
 | `desktop/server/app-store.ts`          | Tags and assignments                                |
 | `desktop/shared/extension-feedback.ts` | Shared notification contract                        |
+| `desktop/shared/filesystem-path.ts`    | POSIX, drive, and UNC path validation               |
 | `desktop/src/pi-client.ts`             | HTTP APIs and AG-UI client                          |
 | `desktop/src/App.tsx`                  | Conversation, composer, and session controls        |
 | `desktop/src/workspace-state.ts`       | Per-session runtime state                           |

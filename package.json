@@ -1,6 +1,6 @@
 {
   "name": "pi-native-app",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "AG-UI web client for Pi, backed by the native Pi TypeScript SDK.",
   "license": "MIT",
   "repository": {
@@ -29,13 +29,19 @@
   ],
   "files": [
     "desktop/dist",
+    "desktop/server-build",
     "desktop/server/agui-adapter.ts",
+    "desktop/server/app-runtime.ts",
     "desktop/server/app-store.ts",
     "desktop/server/clipboard-images.ts",
     "desktop/server/extension-feedback.ts",
     "desktop/server/index.ts",
     "desktop/server/session-registry.ts",
+    "desktop/server/path-safety.ts",
+    "desktop/server/workspace-access.ts",
+    "desktop/server/workspace-picker.ts",
     "desktop/shared/extension-feedback.ts",
+    "desktop/shared/filesystem-path.ts",
     "extensions",
     "LICENSE",
     "README.md",
@@ -56,13 +62,14 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",
     "@types/node": "24.3.0",
+    "esbuild": "^0.25.12",
     "typescript": "5.9.2"
   },
   "scripts": {
     "test": "npm run test --workspace @pi-app/web",
     "build": "npm run build --workspace @pi-app/web",
-    "dev": "node --experimental-strip-types desktop/server/index.ts",
-    "start": "NODE_ENV=production node --experimental-strip-types desktop/server/index.ts",
+    "dev": "node --experimental-strip-types desktop/server/index.ts --dev",
+    "start": "node desktop/server-build/index.js --production",
     "lint": "npm run lint --workspace @pi-app/web",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @pi-app/web",
     "format": "prettier --write extensions package.json tsconfig.json README.md && npm run format --workspace @pi-app/web",

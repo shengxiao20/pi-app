@@ -175,12 +175,61 @@ textarea:focus-visible {
 
 .current-directory {
   color: #66707d;
+  flex: 1;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 10px;
-  margin: 0 8px;
+  margin: 0 4px 0 8px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-path-row {
+  align-items: center;
+  display: flex;
+  min-width: 0;
+}
+
+.choose-workspace {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #66707d;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 28px;
+  height: 26px;
+  justify-content: center;
+  margin-right: 5px;
+  padding: 4px;
+}
+
+.choose-workspace:hover:not(:disabled) {
+  background: #e9edf2;
+  border-color: #d8dee7;
+  color: #273343;
+}
+
+.choose-workspace:focus-visible {
+  outline: 2px solid #4169e1;
+  outline-offset: 1px;
+}
+
+.choose-workspace:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+.choose-workspace svg {
+  fill: none;
+  height: 18px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  width: 18px;
 }
 
 .project-navigation {

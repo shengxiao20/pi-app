@@ -90,6 +90,21 @@ describe("desktop layout", () => {
     expect(styles).toContain(".tool-visibility-toggle input:focus-visible");
   });
 
+  it("places an accessible native workspace picker beside the truncated path", () => {
+    expect(styles).toMatch(
+      /\.workspace-path-row\s*\{[^}]*align-items:\s*center[^}]*display:\s*flex/s,
+    );
+    expect(styles).toMatch(
+      /\.choose-workspace\s*\{[^}]*cursor:\s*pointer[^}]*height:\s*26px/s,
+    );
+    expect(styles).toMatch(
+      /\.choose-workspace:focus-visible\s*\{[^}]*outline:/s,
+    );
+    expect(styles).toMatch(
+      /\.choose-workspace svg\s*\{[^}]*stroke:\s*currentColor/s,
+    );
+  });
+
   it("styles the explicit older-history control", () => {
     expect(styles).toMatch(
       /\.load-older-history\s*\{[^}]*cursor:\s*pointer[^}]*margin:\s*0 auto 18px/s,

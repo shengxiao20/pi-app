@@ -24,10 +24,22 @@ describe("clipboard path insertion", () => {
     ).toBe("/tmp/a b.png /tmp/c.png");
   });
 
+  it("inserts Windows paths without changing their separators", () => {
+    const path = "C:\\Users\\I042866\\AppData\\Local\\Temp\\image.png";
+    expect(insertClipboardPaths("", 0, 0, [path])).toEqual({
+      text: path,
+      cursor: path.length,
+    });
+  });
+
   it.each(
-    [[], ["relative.png"], ["/tmp/a\nb.png"], ["/tmp/a\0b.png"]].map(
-      (paths) => ({ paths }),
-    ),
+    [
+      [],
+      ["relative.png"],
+      ["C:relative.png"],
+      ["/tmp/a\nb.png"],
+      ["/tmp/a\0b.png"],
+    ].map((paths) => ({ paths })),
   )("rejects invalid paths %j", ({ paths }) => {
     expect(() => insertClipboardPaths("", 0, 0, paths)).toThrow(
       "absolute paths without control characters",

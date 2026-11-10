@@ -2,13 +2,22 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  browserLaunchCommand,
+  nodeServerArgs,
+  serverEntryPath,
+} from "../desktop/server/app-runtime.ts";
 
 const HOST = "127.0.0.1";
 const PORT = 1420;
 const BASE_URL = `http://${HOST}:${PORT}`;
 const SERVICE_NAME = "pi-app";
-const SERVER_PATH = fileURLToPath(
-  new URL("../desktop/server/index.ts", import.meta.url),
+const EXTENSION_PATH = fileURLToPath(import.meta.url);
+const SERVER_PATH = serverEntryPath(
+  EXTENSION_PATH,
+  fileURLToPath(new URL("../desktop/server/index.ts", import.meta.url)),
+  fileURLToPath(new URL("../desktop/server-build/index.js", import.meta.url)),
+  process.platform,
 );
 
 export default function registerAppCommand(pi: ExtensionAPI): void {
@@ -37,23 +46,17 @@ async function isServerReady(): Promise<boolean> {
 }
 
 function startServer(cwd: string): void {
-  const child = spawn(
-    process.execPath,
-    ["--experimental-strip-types", SERVER_PATH],
-    {
-      detached: true,
-      env: {
-        ...process.env,
-        NODE_ENV: "production",
-        PI_APP_PI_SDK_URL: import.meta.resolve(
-          "@earendil-works/pi-coding-agent",
-        ),
-        PI_APP_WORKSPACE: cwd,
-        PORT: String(PORT),
-      },
-      stdio: "ignore",
+  const child = spawn(process.execPath, nodeServerArgs(SERVER_PATH), {
+    detached: true,
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      PI_APP_PI_SDK_URL: import.meta.resolve("@earendil-works/pi-coding-agent"),
+      PI_APP_WORKSPACE: cwd,
+      PORT: String(PORT),
     },
-  );
+    stdio: "ignore",
+  });
   child.unref();
 }
 
@@ -77,15 +80,11 @@ async function selectWorkspace(path: string): Promise<void> {
 }
 
 function openBrowser(url: string): void {
-  const command =
-    process.platform === "darwin"
-      ? { file: "open", args: [url] }
-      : process.platform === "win32"
-        ? { file: "cmd", args: ["/c", "start", "", url] }
-        : { file: "xdg-open", args: [url] };
+  const command = browserLaunchCommand(process.platform, url);
   const child = spawn(command.file, command.args, {
     detached: true,
     stdio: "ignore",
+    windowsHide: process.platform === "win32",
   });
   child.unref();
 }

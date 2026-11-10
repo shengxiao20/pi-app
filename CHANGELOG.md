@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.1 (unreleased)
+
+### Native workspace selection
+
+- Add a folder button beside the workspace path, with native directory dialogs on macOS and Windows.
+- Keep the current workspace when the dialog is cancelled.
+- Protect workspace changes from active requests and reject stale workspace pages.
+- Package a JavaScript server entry for npm installs, avoiding Node's TypeScript stripping restriction inside `node_modules`.
+- Accept Windows drive and UNC paths for clipboard images.
+- Use cross-platform npm start scripts and reject static-file paths on other Windows drives.
 
 ### BREAKING CHANGE: Pi RPC + Tauri desktop app → Pi SDK + AG-UI + web
 

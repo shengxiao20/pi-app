@@ -7,11 +7,12 @@ import type {
   SessionManager as SessionManagerType,
 } from "@earendil-works/pi-coding-agent";
 import { realpath } from "node:fs/promises";
-import { basename, relative } from "node:path";
+import { basename } from "node:path";
 import {
   ExtensionFeedback,
   type ExtensionFeedbackEvent,
 } from "./extension-feedback.ts";
+import { isPathInside } from "./path-safety.ts";
 
 const PI_SDK_SPECIFIER =
   process.env.PI_APP_PI_SDK_URL ?? "@earendil-works/pi-coding-agent";
@@ -322,6 +323,5 @@ export function isInsideWorkspace(
   workspace: string,
   candidate: string,
 ): boolean {
-  const value = relative(workspace, candidate);
-  return value === "" || (!value.startsWith("..") && !value.startsWith("/"));
+  return isPathInside(workspace, candidate);
 }

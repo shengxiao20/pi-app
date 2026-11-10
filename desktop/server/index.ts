@@ -4,7 +4,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { extname, join, relative, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -16,6 +16,9 @@ import {
 import { AppStore } from "./app-store.ts";
 import { saveClipboardImage } from "./clipboard-images.ts";
 import { SessionRegistry, workspaceView } from "./session-registry.ts";
+import { WorkspaceAccess, WorkspaceConflict } from "./workspace-access.ts";
+import { NativeWorkspacePicker } from "./workspace-picker.ts";
+import { isPathInside } from "./path-safety.ts";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const initialWorkspace = await realpath(
@@ -24,7 +27,11 @@ const initialWorkspace = await realpath(
 const registry = new SessionRegistry(initialWorkspace);
 const store = await AppStore._open(process.env.PI_APP_STORE);
 const activeRuns = new Map<string, string>();
-const isProduction = process.env.NODE_ENV === "production";
+const workspaceAccess = new WorkspaceAccess();
+const workspacePicker = new NativeWorkspacePicker();
+const isProduction =
+  process.argv.includes("--production") ||
+  (process.env.NODE_ENV !== "development" && !process.argv.includes("--dev"));
 const vite = isProduction
   ? undefined
   : await (
@@ -45,7 +52,25 @@ const server = createServer(async (request, response) => {
         sendError(response, 403, "Cross-origin API requests are not allowed.");
         return;
       }
-      await route(request, response);
+      if (request.method === "GET" && request.url?.startsWith("/api/health")) {
+        await route(request, response);
+        return;
+      }
+      const requestedWorkspace = request.headers["x-pi-app-workspace"];
+      if (requestedWorkspace && requestedWorkspace !== registry.cwd) {
+        sendError(
+          response,
+          409,
+          "This page belongs to a different workspace. Reload it before continuing.",
+        );
+        return;
+      }
+      const operation = () => route(request, response);
+      if (isWorkspaceChange(request)) {
+        await workspaceAccess.change(operation);
+      } else {
+        await workspaceAccess.read(operation);
+      }
       return;
     }
     if (vite) {
@@ -58,7 +83,7 @@ const server = createServer(async (request, response) => {
   } catch (reason) {
     sendError(
       response,
-      500,
+      reason instanceof WorkspaceConflict ? 409 : 500,
       reason instanceof Error ? reason.message : String(reason),
     );
   }
@@ -90,6 +115,19 @@ async function route(
     sendJson(response, 200, workspaceView(registry.cwd));
     return;
   }
+  if (request.method === "POST" && url.pathname === "/api/workspace/select") {
+    if (activeRuns.size > 0) {
+      sendError(response, 409, "Abort active runs before changing workspace.");
+      return;
+    }
+    const path = await workspacePicker.pick(registry.cwd);
+    if (path === null) {
+      sendJson(response, 204, undefined);
+      return;
+    }
+    await replaceWorkspace(path, response);
+    return;
+  }
   if (request.method === "PUT" && url.pathname === "/api/workspace") {
     if (activeRuns.size > 0) {
       sendError(response, 409, "Abort active runs before changing workspace.");
@@ -98,11 +136,7 @@ async function route(
     const body = await jsonBody(request);
     if (typeof body.path !== "string")
       throw new Error("Workspace path is required.");
-    const metadata = await stat(body.path);
-    if (!metadata.isDirectory())
-      throw new Error("Workspace must be a directory.");
-    await registry.replaceWorkspace(body.path);
-    sendJson(response, 200, workspaceView(registry.cwd));
+    await replaceWorkspace(body.path, response);
     return;
   }
   if (request.method === "GET" && url.pathname === "/api/sessions") {
@@ -230,6 +264,25 @@ async function route(
   sendError(response, 404, "API route not found.");
 }
 
+async function replaceWorkspace(
+  path: string,
+  response: ServerResponse,
+): Promise<void> {
+  const metadata = await stat(path);
+  if (!metadata.isDirectory())
+    throw new Error("Workspace must be a directory.");
+  await registry.replaceWorkspace(path);
+  sendJson(response, 200, workspaceView(registry.cwd));
+}
+
+function isWorkspaceChange(request: IncomingMessage): boolean {
+  const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+  return (
+    (request.method === "POST" && pathname === "/api/workspace/select") ||
+    (request.method === "PUT" && pathname === "/api/workspace")
+  );
+}
+
 async function jsonValue(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -281,8 +334,7 @@ async function serveStatic(
   const requested = pathname === "/" ? "index.html" : pathname.slice(1);
   const distRoot = join(root, "dist");
   const path = resolve(distRoot, requested);
-  const containment = relative(distRoot, path);
-  if (containment.startsWith("..") || containment.startsWith("/")) {
+  if (!isPathInside(distRoot, path)) {
     sendError(response, 404, "Page not found.");
     return;
   }

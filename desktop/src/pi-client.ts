@@ -1,6 +1,7 @@
 import { HttpAgent } from "@ag-ui/client";
 import type { Event, Message } from "@ag-ui/core";
 import { EventSchema } from "@ag-ui/core/schemas";
+import { isAbsoluteFileSystemPath } from "../shared/filesystem-path";
 
 export type DataRecord = Record<string, unknown>;
 
@@ -34,6 +35,7 @@ export type PiCommand = {
 export interface PiClient {
   createSession(): Promise<PersistedSession>;
   currentWorkspace(): Promise<CurrentWorkspace>;
+  selectWorkspace(): Promise<CurrentWorkspace | undefined>;
   saveClipboardImage(image: Blob): Promise<string>;
   runAgent(
     sessionId: string,
@@ -63,16 +65,38 @@ export type PersistedSession = {
   title: string;
 };
 
+let expectedWorkspaceId: string | undefined;
+
 export const webPiClient: PiClient = {
   createSession: () => request("/api/sessions", { method: "POST" }),
-  currentWorkspace: () => request("/api/workspace"),
+  currentWorkspace: async () => {
+    const workspace = await request<CurrentWorkspace>(
+      "/api/workspace",
+      undefined,
+      false,
+    );
+    expectedWorkspaceId = workspace.id;
+    return workspace;
+  },
+  selectWorkspace: async () => {
+    const workspace = await request<CurrentWorkspace>(
+      "/api/workspace/select",
+      { method: "POST" },
+      false,
+    );
+    if (workspace) expectedWorkspaceId = workspace.id;
+    return workspace;
+  },
   saveClipboardImage: async (image) => {
     const result = await request<{ path: string }>("/api/clipboard-images", {
       method: "POST",
       headers: { "Content-Type": image.type },
       body: image,
     });
-    if (typeof result.path !== "string" || !result.path.startsWith("/")) {
+    if (
+      typeof result.path !== "string" ||
+      !isAbsoluteFileSystemPath(result.path)
+    ) {
       throw new Error(
         "Clipboard image upload did not return an absolute path.",
       );
@@ -86,6 +110,7 @@ export const webPiClient: PiClient = {
     const agent = new HttpAgent({
       url: "/api/agent",
       threadId: sessionId,
+      headers: { "X-Pi-App-Workspace": expectedWorkspaceId! },
       initialMessages: messages,
     });
     agent.addMessage({
@@ -136,11 +161,20 @@ export const webPiClient: PiClient = {
     ),
 };
 
-async function request<T = void>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
+async function request<T = void>(
+  path: string,
+  init?: RequestInit,
+  workspaceScoped = true,
+): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set(
+    "Content-Type",
+    headers.get("Content-Type") ?? "application/json",
+  );
+  if (workspaceScoped && expectedWorkspaceId) {
+    headers.set("X-Pi-App-Workspace", expectedWorkspaceId);
+  }
+  const response = await fetch(path, { ...init, headers });
   if (!response.ok) {
     const body = (await response.json()) as { message?: string };
     throw new Error(

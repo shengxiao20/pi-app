@@ -34,6 +34,7 @@ import {
   type PiNotification,
 } from "../shared/extension-feedback";
 import {
+  canCreateSession,
   createWorkspaceState,
   isSessionInteractive,
   workspaceReducer,
@@ -121,6 +122,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   const [error, setError] = useState<string>();
   const [draft, setDraft] = useState("");
   const [pastingImages, setPastingImages] = useState(false);
+  const [changingWorkspace, setChangingWorkspace] = useState(false);
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const [commandIndex, setCommandIndex] = useState(0);
   const [showCommands, setShowCommands] = useState(false);
@@ -163,8 +165,8 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   const [directory, setDirectory] = useState("");
   const [activeSessionId, setActiveSessionId] = useState(INITIAL_SESSION_ID);
   const activeSessionIdRef = useRef(INITIAL_SESSION_ID);
-  const workspaceIdRef = useRef<string | undefined>(undefined);
   const sessionsRef = useRef<WorkspaceSession[]>([]);
+  const workspaceEpochRef = useRef(0);
 
   const commandDiscovery = useRef<Promise<void> | undefined>(undefined);
   const loadingOlderSessions = useRef(new Set<string>());
@@ -185,6 +187,11 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   const activeRuntime = runtimeState.sessions[activeSessionId];
   const sessionStatus = activeRuntime?.status ?? status;
   const sessionError = activeRuntime?.error ?? error;
+  const conversationTitle =
+    activeSession?.title ??
+    (status === "idle" || status === "starting"
+      ? "Connecting to Pi"
+      : "New chat");
 
   function setRuntimeDraft(value: string) {
     setDraft(value);
@@ -315,28 +322,29 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
 
   useEffect(() => {
     let active = true;
+    const workspaceEpoch = workspaceEpochRef.current;
     void (async () => {
       setStatus("starting");
       try {
         startup.current ??= initializeWorkspace(client);
         const workspace = await startup.current;
-        if (active) {
-          workspaceIdRef.current = workspace.id;
-          setDirectory(workspace.directory);
-          setSessions(workspace.sessions);
-          const [nextTags, nextAssignments] = await Promise.all([
-            client.listTags(),
-            client.listSessionTagAssignments(),
-          ]);
-          setTags(nextTags);
-          setAssignments(nextAssignments);
-          activeSessionIdRef.current =
-            workspace.activeSession?.id ?? INITIAL_SESSION_ID;
-          setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
-          setStatus("ready");
-        }
+        if (!active || workspaceEpoch !== workspaceEpochRef.current) return;
+        setDirectory(workspace.directory);
+        setSessions(workspace.sessions);
+        const [nextTags, nextAssignments] = await Promise.all([
+          client.listTags(),
+          client.listSessionTagAssignments(),
+        ]);
+        if (!active || workspaceEpoch !== workspaceEpochRef.current) return;
+        setTags(nextTags);
+        setAssignments(nextAssignments);
+        activeSessionIdRef.current =
+          workspace.activeSession?.id ?? INITIAL_SESSION_ID;
+        setActiveSessionId(workspace.activeSession?.id ?? INITIAL_SESSION_ID);
+        setStatus("ready");
       } catch (reason) {
-        if (active) fail(setError, setStatus, reason);
+        if (active && workspaceEpoch === workspaceEpochRef.current)
+          fail(setError, setStatus, reason);
       }
     })();
     return () => {
@@ -345,14 +353,17 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   }, [client]);
 
   async function assignTag(sessionId: string, tagId: number | null) {
+    const workspaceEpoch = workspaceEpochRef.current;
     try {
       await client.assignSessionTag(sessionId, tagId);
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       setAssignments((current) => [
         ...current.filter((assignment) => assignment.sessionId !== sessionId),
         ...(tagId === null ? [] : [{ sessionId, tagId }]),
       ]);
     } catch (reason) {
-      fail(setError, setStatus, reason);
+      if (workspaceEpoch === workspaceEpochRef.current)
+        fail(setError, setStatus, reason);
     }
   }
 
@@ -445,6 +456,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
 
   async function saveRename() {
     if (!renameTarget) return;
+    const workspaceEpoch = workspaceEpochRef.current;
     const name = renameValue.trim();
     const original =
       renameTarget.kind === "tag"
@@ -455,52 +467,124 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
     try {
       if (renameTarget.kind === "tag") {
         await client.renameTag(renameTarget.tag.id, name);
-        setTags(await client.listTags());
+        const nextTags = await client.listTags();
+        if (workspaceEpoch !== workspaceEpochRef.current) return;
+        setTags(nextTags);
       } else {
         await client.renameSession(renameTarget.session.id, name);
+        if (workspaceEpoch !== workspaceEpochRef.current) return;
         updateSession(renameTarget.session.id, setSessions, (session) => ({
           ...session,
           title: name,
         }));
       }
     } catch (reason) {
-      fail(setError, setStatus, reason);
+      if (workspaceEpoch === workspaceEpochRef.current)
+        fail(setError, setStatus, reason);
     }
   }
 
   async function removeTag(tag: Tag) {
+    const workspaceEpoch = workspaceEpochRef.current;
     try {
       await client.deleteTag(tag.id);
       const [nextTags, nextAssignments] = await Promise.all([
         client.listTags(),
         client.listSessionTagAssignments(),
       ]);
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       setTags(nextTags);
       setAssignments(nextAssignments);
       setContextMenu(undefined);
     } catch (reason) {
-      fail(setError, setStatus, reason);
+      if (workspaceEpoch === workspaceEpochRef.current)
+        fail(setError, setStatus, reason);
     }
   }
 
   async function createTag() {
     const name = newTagName.trim();
     if (!name) return;
+    const workspaceEpoch = workspaceEpochRef.current;
     try {
       const tag = await client.createTag(name);
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       setTags((current) => [...current, tag]);
       setExpandedTags((current) => new Set(current).add(String(tag.id)));
       setNewTagName("");
       setCreatingTag(false);
     } catch (reason) {
-      fail(setError, setStatus, reason);
+      if (workspaceEpoch === workspaceEpochRef.current)
+        fail(setError, setStatus, reason);
+    }
+  }
+
+  async function chooseWorkspace() {
+    if (changingWorkspace) return;
+    let workspaceEpoch = workspaceEpochRef.current;
+    setChangingWorkspace(true);
+    setError(undefined);
+    try {
+      const selected = await client.selectWorkspace();
+      if (!selected) return;
+      workspaceEpochRef.current += 1;
+      workspaceEpoch = workspaceEpochRef.current;
+      setError(undefined);
+      if (activeRuntime?.status === "streaming") {
+        dispatchRuntime({
+          type: "set-status",
+          sessionId: activeSessionIdRef.current,
+          status: "completed",
+        });
+      }
+      activeSessionIdRef.current = INITIAL_SESSION_ID;
+      setActiveSessionId(INITIAL_SESSION_ID);
+      setDirectory(selected.path);
+      setSessions([]);
+      setTags([]);
+      setAssignments([]);
+      setDraft("");
+      setCommands([]);
+      setCommandIndex(0);
+      setShowCommands(false);
+      setCreatingTag(false);
+      setNewTagName("");
+      setNotifications([]);
+      setNotificationsOpen(false);
+      notifiedGenerations.current.clear();
+      commandDiscovery.current = undefined;
+      setContextMenu(undefined);
+      setRenameTarget(undefined);
+      setExpandedTags(new Set(["uncategorized"]));
+      const [workspace, nextTags, nextAssignments] = await Promise.all([
+        initializeWorkspace(client),
+        client.listTags(),
+        client.listSessionTagAssignments(),
+      ]);
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
+      setDirectory(workspace.directory);
+      setSessions(workspace.sessions);
+      setTags(nextTags);
+      setAssignments(nextAssignments);
+      const nextSessionId = workspace.activeSession?.id ?? INITIAL_SESSION_ID;
+      activeSessionIdRef.current = nextSessionId;
+      setActiveSessionId(nextSessionId);
+      setDraft(runtimeState.sessions[nextSessionId]?.draft ?? "");
+      setStatus("ready");
+    } catch (reason) {
+      if (workspaceEpoch === workspaceEpochRef.current)
+        fail(setError, setStatus, reason);
+    } finally {
+      setChangingWorkspace(false);
     }
   }
 
   async function createSession() {
-    if (!isSessionInteractive(activeRuntime)) return;
+    if (changingWorkspace || !canCreateSession(status, activeRuntime)) return;
+    const workspaceEpoch = workspaceEpochRef.current;
     try {
       const persisted = await client.createSession();
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       const session = loadedWorkspaceSession(persisted);
       setSessions((current) => [...current, session]);
       dispatchRuntime({
@@ -515,11 +599,13 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
       setActiveSessionId(session.id);
       setDraft("");
     } catch (reason) {
-      fail(setError, setStatus, reason);
+      if (workspaceEpoch === workspaceEpochRef.current)
+        fail(setError, setStatus, reason);
     }
   }
 
   async function selectSession(session: WorkspaceSession) {
+    const workspaceEpoch = workspaceEpochRef.current;
     setNotifications((current) =>
       current.filter((notification) => notification.sessionId !== session.id),
     );
@@ -536,6 +622,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
         historyLoading: true,
       }));
       const history = await getHistory(client, session.id);
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       updateSession(session.id, setSessions, (current) => ({
         ...current,
         historyLoaded: true,
@@ -545,6 +632,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
         history: [...history.history, ...current.history],
       }));
     } catch (reason) {
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       activeSessionIdRef.current = previousSessionId;
       setActiveSessionId(previousSessionId);
       fail(setError, setStatus, reason);
@@ -552,6 +640,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   }
 
   async function loadOlderHistory() {
+    const workspaceEpoch = workspaceEpochRef.current;
     const session = sessions.find(
       ({ id }) => id === activeSessionIdRef.current,
     );
@@ -572,6 +661,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
         session.historyBefore,
         HISTORY_PAGE_SIZE,
       );
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       updateSession(session.id, setSessions, (current) => {
         const persistedMessages = [
           ...page.messages,
@@ -590,11 +680,13 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
         };
       });
     } catch (reason) {
-      fail(setError, setStatus, reason);
-      updateSession(session.id, setSessions, (current) => ({
-        ...current,
-        historyLoading: false,
-      }));
+      if (workspaceEpoch === workspaceEpochRef.current) {
+        fail(setError, setStatus, reason);
+        updateSession(session.id, setSessions, (current) => ({
+          ...current,
+          historyLoading: false,
+        }));
+      }
     } finally {
       loadingOlderSessions.current.delete(session.id);
     }
@@ -606,8 +698,14 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
     );
     if (!images.length) return;
     event.preventDefault();
-    if (pastingImages || !isSessionInteractive(activeRuntime)) return;
+    if (
+      pastingImages ||
+      changingWorkspace ||
+      !isSessionInteractive(activeRuntime)
+    )
+      return;
     const sessionId = activeSessionId;
+    const workspaceEpoch = workspaceEpochRef.current;
     const textarea = event.currentTarget;
     const original = textarea.value;
     const start = textarea.selectionStart;
@@ -618,6 +716,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
       const paths = await Promise.all(
         images.map((image) => client.saveClipboardImage(image)),
       );
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       const insertion = insertClipboardPaths(original, start, end, paths);
       dispatchRuntime({ type: "set-draft", sessionId, draft: insertion.text });
       if (activeSessionIdRef.current === sessionId) {
@@ -629,6 +728,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
         });
       }
     } catch (reason) {
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       const message = reason instanceof Error ? reason.message : String(reason);
       dispatchRuntime({
         type: "set-status",
@@ -647,11 +747,13 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
     if (
       !message ||
       !activeSession ||
+      changingWorkspace ||
       pastingImages ||
       !isSessionInteractive(activeRuntime)
     )
       return;
     setError(undefined);
+    const workspaceEpoch = workspaceEpochRef.current;
     updateSession(activeSession.id, setSessions, (session) => ({
       ...session,
       history: [
@@ -666,8 +768,11 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
       status: "streaming",
     });
     try {
-      await client.runAgent(activeSession.id, message, handleEvent);
+      await client.runAgent(activeSession.id, message, (event) => {
+        if (workspaceEpoch === workspaceEpochRef.current) handleEvent(event);
+      });
     } catch (reason) {
+      if (workspaceEpoch !== workspaceEpochRef.current) return;
       const record = asRecord(reason);
       const message =
         reason instanceof Error
@@ -686,6 +791,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   }
 
   async function abort() {
+    const workspaceEpoch = workspaceEpochRef.current;
     dispatchRuntime({
       type: "set-status",
       sessionId: activeSessionId,
@@ -694,7 +800,8 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
     try {
       await client.abortSession(activeSessionId);
     } catch (reason) {
-      fail(setError, setStatus, reason);
+      if (workspaceEpoch === workspaceEpochRef.current)
+        fail(setError, setStatus, reason);
     }
   }
 
@@ -705,10 +812,16 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
         new Error("Select a session before loading commands"),
       );
     }
+    const workspaceEpoch = workspaceEpochRef.current;
+    const sessionId = activeSession.id;
     commandDiscovery.current = client
-      .listCommands(activeSession.id)
-      .then(setCommands)
+      .listCommands(sessionId)
+      .then((nextCommands) => {
+        if (workspaceEpoch === workspaceEpochRef.current)
+          setCommands(nextCommands);
+      })
       .catch((reason) => {
+        if (workspaceEpoch !== workspaceEpochRef.current) return;
         commandDiscovery.current = undefined;
         fail(setError, setStatus, reason);
       });
@@ -828,10 +941,17 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
             )}
           </section>
         </div>
-        <nav aria-label="Workspace navigation" className="workspace-navigation">
+        <nav
+          aria-busy={changingWorkspace}
+          aria-label="Workspace navigation"
+          className="workspace-navigation"
+          inert={changingWorkspace}
+        >
           <button
             className="new-session"
-            disabled={!isSessionInteractive(activeRuntime)}
+            disabled={
+              changingWorkspace || !canCreateSession(status, activeRuntime)
+            }
             onClick={() => void createSession()}
             type="button"
           >
@@ -842,9 +962,25 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
             aria-labelledby="workspace-heading"
           >
             <h2 id="workspace-heading">Workspace</h2>
-            <p className="current-directory" title={directory}>
-              {directory || "No workspace selected"}
-            </p>
+            <div className="workspace-path-row">
+              <p className="current-directory" title={directory}>
+                {directory || "No workspace selected"}
+              </p>
+              <button
+                aria-label="Choose workspace directory"
+                className="choose-workspace"
+                disabled={changingWorkspace}
+                onClick={() => void chooseWorkspace()}
+                title={
+                  changingWorkspace
+                    ? "Choosing workspace…"
+                    : "Choose workspace directory"
+                }
+                type="button"
+              >
+                <FolderIcon />
+              </button>
+            </div>
           </section>
           <section
             className="navigation-section recents"
@@ -1063,13 +1199,15 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
         role="separator"
         type="button"
       />
-      <section className="workspace">
+      <section
+        aria-busy={changingWorkspace}
+        className="workspace"
+        inert={changingWorkspace}
+      >
         <header className="workspace-header">
           <div className="workspace-title">
             <p className="eyebrow">CONVERSATION</p>
-            <h1 title={activeSession?.title || "Connecting to Pi"}>
-              {activeSession?.title || "Connecting to Pi"}
-            </h1>
+            <h1 title={conversationTitle}>{conversationTitle}</h1>
           </div>
           <div
             aria-label="Conversation display"
@@ -1115,7 +1253,11 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
             }
             aria-controls="slash-commands"
             aria-expanded={matchingCommands.length > 0}
-            disabled={pastingImages || !isSessionInteractive(activeRuntime)}
+            disabled={
+              changingWorkspace ||
+              pastingImages ||
+              !isSessionInteractive(activeRuntime)
+            }
             id="prompt"
             onChange={(event) => {
               const value = event.target.value;
@@ -1525,6 +1667,15 @@ function PlusIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 16 16">
       <path d="M8 3v10M3 8h10" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M2.5 5.25A1.75 1.75 0 0 1 4.25 3.5h4l1.75 2h5.75A1.75 1.75 0 0 1 17.5 7.25v7.5a1.75 1.75 0 0 1-1.75 1.75h-11A2.25 2.25 0 0 1 2.5 14.25z" />
+      <path d="M2.75 8h14" />
     </svg>
   );
 }

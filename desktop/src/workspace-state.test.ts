@@ -2,6 +2,7 @@ import { EventType } from "@ag-ui/core";
 import { describe, expect, it } from "vitest";
 
 import {
+  canCreateSession,
   createWorkspaceState,
   isSessionInteractive,
   workspaceReducer,
@@ -97,6 +98,12 @@ describe("workspaceReducer", () => {
     });
     state = workspaceReducer(state, { type: "select-session", sessionId: "a" });
     expect(state.sessions.a).toMatchObject({ status: "idle", unread: false });
+  });
+
+  it("allows a first session only after an empty workspace is ready", () => {
+    expect(canCreateSession("starting", undefined)).toBe(false);
+    expect(canCreateSession("ready", undefined)).toBe(true);
+    expect(canCreateSession("failed", undefined)).toBe(false);
   });
 
   it("blocks prompts only for the session that is streaming", () => {

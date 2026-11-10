@@ -1,12 +1,12 @@
 {
   "name": "@pi-app/web",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
-    "dev": "node --experimental-strip-types server/index.ts",
-    "start": "NODE_ENV=production node --experimental-strip-types server/index.ts",
-    "build": "tsc --noEmit && vite build",
+    "dev": "node --experimental-strip-types server/index.ts --dev",
+    "start": "node server-build/index.js --production",
+    "build": "tsc --noEmit && vite build && node build-server.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

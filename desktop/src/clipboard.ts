@@ -1,3 +1,5 @@
+import { isAbsoluteFileSystemPath } from "../shared/filesystem-path";
+
 export function insertClipboardPaths(
   text: string,
   start: number,
@@ -6,7 +8,9 @@ export function insertClipboardPaths(
 ): { text: string; cursor: number } {
   if (
     !paths.length ||
-    paths.some((path) => !path.startsWith("/") || /\p{Cc}/u.test(path))
+    paths.some(
+      (path) => !isAbsoluteFileSystemPath(path) || /\p{Cc}/u.test(path),
+    )
   ) {
     throw new Error(
       "Clipboard images require absolute paths without control characters.",

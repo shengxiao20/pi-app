@@ -8,6 +8,9 @@ coverage/
 *.tgz
 *.log
 
+# Generated server bundle
+desktop/server-build/
+
 # Environment and local editor state
 .env
 .env.*

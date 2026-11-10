@@ -35,6 +35,7 @@ function createClient() {
       title: "new-session",
     }),
     currentWorkspace: vi.fn().mockImplementation(async () => workspace),
+    selectWorkspace: vi.fn().mockResolvedValue(undefined),
     runAgent: vi
       .fn()
       .mockImplementation(async (sessionId, _prompt, handler) => {
@@ -136,6 +137,46 @@ describe("App web workspace", () => {
       "a-session",
       Number.MAX_SAFE_INTEGER,
       80,
+    );
+  });
+
+  it("starts and sends the first chat in an empty workspace", async () => {
+    const fake = createClient();
+    fake.client.listSessions = vi.fn().mockResolvedValue([]);
+    render(<App client={fake.client} />);
+
+    expect(
+      await screen.findByText("No sessions in this workspace."),
+    ).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "New chat" }),
+    ).toBeTruthy();
+
+    const newChat = screen.getByRole<HTMLButtonElement>("button", {
+      name: /New chat/,
+    });
+    await waitFor(() => expect(newChat.disabled).toBe(false));
+    fireEvent.click(newChat);
+    await waitFor(() =>
+      expect(fake.client.createSession).toHaveBeenCalledTimes(1),
+    );
+
+    const textbox = await screen.findByRole<HTMLTextAreaElement>("combobox", {
+      name: "Message",
+    });
+    await waitFor(() => expect(textbox.disabled).toBe(false));
+    fireEvent.change(textbox, { target: { value: "First prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(fake.client.runAgent).toHaveBeenCalledWith(
+        "new-session",
+        "First prompt",
+        expect.any(Function),
+      ),
+    );
+    expect((await screen.findAllByText("AG-UI reply")).length).toBeGreaterThan(
+      0,
     );
   });
 
@@ -550,6 +591,112 @@ describe("App web workspace", () => {
     expect(textbox.value).toBe("Keep this draft");
     expect(textbox.disabled).toBe(false);
     expect(fake.client.runAgent).not.toHaveBeenCalled();
+  });
+
+  it("switches workspace from the folder picker and loads its sessions", async () => {
+    const fake = createClient();
+    fake.client.selectWorkspace = vi.fn().mockImplementation(async () => {
+      const workspace = {
+        id: "workspace-b",
+        path: "/workspace/b",
+        displayName: "b",
+      };
+      fake.client.currentWorkspace = vi.fn().mockResolvedValue(workspace);
+      fake.client.listSessions = vi
+        .fn()
+        .mockResolvedValue([
+          { id: "b-session", path: "/sessions/b.jsonl", title: "Session B" },
+        ]);
+      return workspace;
+    });
+    render(<App client={fake.client} />);
+
+    const choose = await screen.findByRole("button", {
+      name: "Choose workspace directory",
+    });
+    expect(choose.querySelector("svg")).toBeTruthy();
+    fireEvent.click(choose);
+
+    expect(await screen.findByText("/workspace/b")).toBeTruthy();
+    expect((await screen.findAllByText("Session B")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Session A")).toBeNull();
+    expect(fake.client.selectWorkspace).toHaveBeenCalledOnce();
+    expect(fake.client.sessionHistory).toHaveBeenCalledWith(
+      "b-session",
+      Number.MAX_SAFE_INTEGER,
+      80,
+    );
+  });
+
+  it("does not apply a delayed workspace result after a successful switch", async () => {
+    const fake = createClient();
+    let resolveTag!: (tag: { id: number; name: string }) => void;
+    fake.client.createTag = vi.fn(
+      () =>
+        new Promise<{ id: number; name: string }>((resolve) => {
+          resolveTag = resolve;
+        }),
+    );
+    fake.client.selectWorkspace = vi.fn().mockImplementation(async () => {
+      const workspace = {
+        id: "workspace-b",
+        path: "/workspace/b",
+        displayName: "b",
+      };
+      fake.client.currentWorkspace = vi.fn().mockResolvedValue(workspace);
+      fake.client.listSessions = vi
+        .fn()
+        .mockResolvedValue([
+          { id: "b-session", path: "/sessions/b.jsonl", title: "Session B" },
+        ]);
+      return workspace;
+    });
+    render(<App client={fake.client} />);
+    await screen.findByText("/workspace/a");
+    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
+    fireEvent.change(screen.getByPlaceholderText("New tag"), {
+      target: { value: "Old workspace tag" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    await waitFor(() => expect(fake.client.createTag).toHaveBeenCalledOnce());
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose workspace directory" }),
+    );
+    expect(await screen.findByText("/workspace/b")).toBeTruthy();
+    await act(async () => {
+      resolveTag({ id: 99, name: "Old workspace tag" });
+    });
+    expect(screen.queryByText("Old workspace tag")).toBeNull();
+  });
+
+  it("keeps the current workspace when the system picker is cancelled", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Choose workspace directory" }),
+    );
+
+    expect((await screen.findAllByText("Session A")).length).toBeGreaterThan(0);
+    expect(screen.getByText("/workspace/a")).toBeTruthy();
+    expect(fake.client.currentWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it("shows native picker errors and preserves the current workspace", async () => {
+    const fake = createClient();
+    fake.client.selectWorkspace = vi
+      .fn()
+      .mockRejectedValue(new Error("Directory chooser failed."));
+    render(<App client={fake.client} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Choose workspace directory" }),
+    );
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Directory chooser failed.",
+    );
+    expect(screen.getByText("/workspace/a")).toBeTruthy();
+    expect((await screen.findAllByText("Session A")).length).toBeGreaterThan(0);
   });
 
   it("renders AG-UI text events from a run", async () => {
