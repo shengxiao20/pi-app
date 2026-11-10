@@ -1,21 +1,12 @@
 # CodeGraph index (local tool state)
 .codegraph/
 
-# Node dependencies and package output
+# Node dependencies and build output
 node_modules/
 dist/
-desktop/dist/
 coverage/
 *.tgz
-
-# Rust and Tauri build output
-target/
-desktop/src-tauri/target/
-desktop/src-tauri/gen/
-
-# Native platform artifacts are built and published only by release CI.
-packages/*/bin/
-packages/*/Pi App.app/
+*.log
 
 # Environment and local editor state
 .env

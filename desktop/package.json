@@ -1,10 +1,11 @@
 {
-  "name": "@pi-app/desktop",
+  "name": "@pi-app/web",
   "private": true,
   "version": "0.1.15",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node --experimental-strip-types server/index.ts",
+    "start": "NODE_ENV=production node --experimental-strip-types server/index.ts",
     "build": "tsc --noEmit && vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -13,7 +14,9 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@tauri-apps/api": "2.11.0",
+    "@ag-ui/client": "^1.0.4",
+    "@ag-ui/core": "^1.0.4",
+    "@earendil-works/pi-coding-agent": "^1.5.0",
     "katex": "^0.19.0",
     "mermaid": "^11.17.2",
     "react": "19.1.1",

@@ -67,13 +67,27 @@ describe("desktop layout", () => {
     );
   });
 
-  it("styles the tool visibility toggle as a pressed control", () => {
+  it("aligns the title, conversation, and composer within one centered width", () => {
     expect(styles).toMatch(
-      /\.tool-visibility-toggle\s*\{[^}]*cursor:\s*pointer[^}]*padding:\s*7px 10px/s,
+      /\.workspace-header,\s*\.conversation,\s*\.composer\s*\{[^}]*margin:\s*0 auto[^}]*max-width:\s*800px[^}]*min-width:\s*0[^}]*width:\s*100%/s,
+    );
+    expect(styles).toMatch(/\.workspace-header\s*\{[^}]*display:\s*grid/s);
+    expect(styles).toMatch(
+      /\.workspace-title h1\s*\{[^}]*font-size:\s*clamp\(28px, 2vw, 32px\)[^}]*overflow-wrap:\s*anywhere[^}]*-webkit-line-clamp:\s*2/s,
+    );
+  });
+
+  it("places the tool visibility checkbox in a right-aligned toolbar", () => {
+    expect(styles).toMatch(
+      /\.workspace-toolbar\s*\{[^}]*display:\s*flex[^}]*justify-content:\s*flex-end/s,
     );
     expect(styles).toMatch(
-      /\.tool-visibility-toggle\[aria-pressed="true"\]\s*\{[^}]*background:\s*#dfe7eb/s,
+      /\.tool-visibility-toggle\s*\{[^}]*cursor:\s*pointer[^}]*min-height:\s*32px[^}]*white-space:\s*nowrap/s,
     );
+    expect(styles).toMatch(
+      /\.tool-visibility-toggle input\s*\{[^}]*accent-color:\s*#3d586d/s,
+    );
+    expect(styles).toContain(".tool-visibility-toggle input:focus-visible");
   });
 
   it("styles the explicit older-history control", () => {
@@ -85,6 +99,27 @@ describe("desktop layout", () => {
   it("styles an ellipsized target beside each tool invocation", () => {
     expect(styles).toMatch(
       /\.tool summary code\s*\{[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/s,
+    );
+  });
+
+  it("fills the viewport beside a bounded resizable sidebar", () => {
+    expect(styles).toMatch(
+      /grid-template-columns:\s*var\(--sidebar-width, 280px\) minmax\(0, 1fr\)/,
+    );
+    expect(styles).toMatch(
+      /\.sidebar-resize-handle\s*\{[^}]*left:\s*calc\(var\(--sidebar-width, 280px\) - 4px\)[^}]*position:\s*absolute[^}]*width:\s*8px/s,
+    );
+    expect(styles).toMatch(
+      /\.sidebar-resize-handle::after\s*\{[^}]*left:\s*50%[^}]*transform:\s*translateX\(-50%\)[^}]*width:\s*1px/s,
+    );
+    expect(styles).toMatch(
+      /\.sidebar-resize-handle:focus-visible\s*\{[^}]*outline:\s*none/s,
+    );
+    expect(styles).not.toMatch(
+      /\.sidebar-resize-handle\s*\{[^}]*(border-left|border-right):/s,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width: 700px\)\s*\{[\s\S]*?\.sidebar-resize-handle\s*\{[^}]*display:\s*none/s,
     );
   });
 

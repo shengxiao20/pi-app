@@ -1,7 +1,7 @@
 {
   "name": "pi-native-app",
   "version": "0.1.15",
-  "description": "Clean, intuitive Pi desktop client for macOS Apple Silicon and Windows x64, with familiar Pi workflows and easier content copying / 简洁直观的 Pi 桌面客户端，适用于 macOS Apple Silicon 和 Windows x64，提供熟悉的 Pi 工作流和更便捷的内容复制。",
+  "description": "AG-UI web client for Pi, backed by the native Pi TypeScript SDK.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,53 +13,59 @@
   "homepage": "https://github.com/shengxiao20/pi-app#readme",
   "private": false,
   "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",
     "pi",
     "pi-coding-agent",
-    "native",
-    "desktop",
-    "tauri"
+    "web",
+    "ag-ui"
   ],
   "workspaces": [
     "desktop"
   ],
   "files": [
-    "README.md",
+    "desktop/dist",
+    "desktop/server/agui-adapter.ts",
+    "desktop/server/app-store.ts",
+    "desktop/server/clipboard-images.ts",
+    "desktop/server/extension-feedback.ts",
+    "desktop/server/index.ts",
+    "desktop/server/session-registry.ts",
+    "desktop/shared/extension-feedback.ts",
+    "extensions",
     "LICENSE",
-    "dist/launcher",
-    "extensions"
+    "README.md"
   ],
-  "optionalDependencies": {
-    "pi-native-app-darwin-arm64": "file:packages/pi-native-app-darwin-arm64",
-    "pi-native-app-win32-x64-msvc": "file:packages/pi-native-app-win32-x64-msvc"
-  },
   "pi": {
     "extensions": [
       "./extensions"
     ]
   },
+  "dependencies": {
+    "@ag-ui/core": "^1.0.4",
+    "zod": "^4.3.6"
+  },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "^1.5.0"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.5.0",
     "@types/node": "24.3.0",
     "typescript": "5.9.2"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test tests/**/*.test.mjs",
-    "lint": "npm run lint --workspace @pi-app/desktop",
-    "typecheck": "npm run build:launcher && tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @pi-app/desktop",
-    "test:frontend": "npm run test --workspace @pi-app/desktop",
-    "format": "prettier --write launcher extensions tests scripts package.json tsconfig.json tsconfig.launcher.json && npm run format --workspace @pi-app/desktop",
-    "format:check": "prettier --check launcher extensions tests scripts package.json tsconfig.json tsconfig.launcher.json && npm run format:check --workspace @pi-app/desktop",
-    "rust:fmt": "cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check",
-    "rust:clippy": "cargo clippy --manifest-path desktop/src-tauri/Cargo.toml -- -D warnings",
-    "rust:test": "cargo test --manifest-path desktop/src-tauri/Cargo.toml",
-    "build:launcher": "tsc -p tsconfig.launcher.json",
-    "build:native": "node scripts/build-native.mjs && node scripts/package-native.mjs",
-    "prepack": "npm run build:launcher && npm run build:native",
-    "test:packaging": "node --test tests/packaging/smoke.test.mjs"
+    "test": "npm run test --workspace @pi-app/web",
+    "build": "npm run build --workspace @pi-app/web",
+    "dev": "node --experimental-strip-types desktop/server/index.ts",
+    "start": "NODE_ENV=production node --experimental-strip-types desktop/server/index.ts",
+    "lint": "npm run lint --workspace @pi-app/web",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @pi-app/web",
+    "format": "prettier --write extensions package.json tsconfig.json README.md && npm run format --workspace @pi-app/web",
+    "format:check": "prettier --check extensions package.json tsconfig.json README.md && npm run format:check --workspace @pi-app/web",
+    "prepack": "npm run build"
   }
 }

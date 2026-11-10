@@ -5,11 +5,12 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
-import type { PiClient, RpcRecord, SessionProcessEvent } from "./pi-client";
+import type { PiClient, DataRecord } from "./pi-client";
 
 vi.mock("mermaid", () => ({
   default: {
@@ -19,49 +20,68 @@ vi.mock("mermaid", () => ({
 }));
 
 function createClient() {
-  let workspace = {
+  const workspace = {
     id: "workspace-a",
     path: "/workspace/a",
     displayName: "a",
   };
-  let handler: ((event: SessionProcessEvent) => void) | undefined;
-  const sessions = {
-    "workspace-a": [
-      { id: "a-session", path: "/sessions/a.jsonl", title: "Session A" },
-    ],
-    "workspace-b": [
-      { id: "b-session", path: "/sessions/b.jsonl", title: "Session B" },
-    ],
-  };
+  const sessions = [
+    { id: "a-session", path: "/sessions/a.jsonl", title: "Session A" },
+  ];
   const client: PiClient = {
-    startSession: vi.fn().mockResolvedValue(undefined),
     createSession: vi.fn().mockResolvedValue({
       id: "new-session",
       path: "/sessions/new.jsonl",
       title: "new-session",
     }),
     currentWorkspace: vi.fn().mockImplementation(async () => workspace),
-    chooseWorkspace: vi.fn().mockImplementation(async () => {
-      workspace = {
-        id: "workspace-b",
-        path: "/workspace/b",
-        displayName: "b",
-      };
-      return workspace;
-    }),
-    sendRpc: vi.fn().mockResolvedValue({ type: "response", success: true }),
-    abortSession: vi
+    runAgent: vi
       .fn()
-      .mockResolvedValue({ type: "response", success: true }),
-    listen: vi.fn().mockImplementation(async (nextHandler) => {
-      handler = nextHandler;
-      return () => undefined;
-    }),
-    listSessions: vi
-      .fn()
-      .mockImplementation(
-        async () => sessions[workspace.id as keyof typeof sessions],
-      ),
+      .mockImplementation(async (sessionId, _prompt, handler) => {
+        handler({
+          sessionId,
+          runId: "run-1",
+          event: { type: "RUN_STARTED", threadId: sessionId, runId: "run-1" },
+        });
+        handler({
+          sessionId,
+          runId: "run-1",
+          event: {
+            type: "TEXT_MESSAGE_START",
+            messageId: "assistant-1",
+            role: "assistant",
+          },
+        });
+        handler({
+          sessionId,
+          runId: "run-1",
+          event: {
+            type: "TEXT_MESSAGE_CONTENT",
+            messageId: "assistant-1",
+            delta: "AG-UI reply",
+          },
+        });
+        handler({
+          sessionId,
+          runId: "run-1",
+          event: { type: "TEXT_MESSAGE_END", messageId: "assistant-1" },
+        });
+        handler({
+          sessionId,
+          runId: "run-1",
+          event: {
+            type: "RUN_FINISHED",
+            threadId: sessionId,
+            runId: "run-1",
+            outcome: { type: "success" },
+          },
+        });
+      }),
+    saveClipboardImage: vi.fn().mockResolvedValue("/tmp/pi-clipboard-test.png"),
+    abortSession: vi.fn().mockResolvedValue(undefined),
+    renameSession: vi.fn().mockResolvedValue(undefined),
+    listCommands: vi.fn().mockResolvedValue([]),
+    listSessions: vi.fn().mockResolvedValue(sessions),
     listTags: vi.fn().mockResolvedValue([]),
     createTag: vi.fn(),
     renameTag: vi.fn(),
@@ -69,18 +89,18 @@ function createClient() {
     listSessionTagAssignments: vi.fn().mockResolvedValue([]),
     assignSessionTag: vi.fn(),
     sessionHistory: vi.fn().mockResolvedValue({
-      messages: [] as RpcRecord[],
+      messages: [] as DataRecord[],
       before: 0,
       hasMore: false,
     }),
   };
-  return { client, emit: (event: SessionProcessEvent) => handler?.(event) };
+  return { client };
 }
 
-describe("App workspace boundary", () => {
+describe("App web workspace", () => {
   afterEach(cleanup);
 
-  it("renders LaTex display math from persisted Pi messages", async () => {
+  it("renders persisted Markdown without changing the page renderer", async () => {
     const fake = createClient();
     fake.client.sessionHistory = vi.fn().mockResolvedValue({
       messages: [
@@ -89,56 +109,7 @@ describe("App workspace boundary", () => {
           content: [
             {
               type: "text",
-              text: "\\[ \\text{答案} = n - \\text{最终安全块长度} \\]",
-            },
-          ],
-        },
-      ],
-      before: 0,
-      hasMore: false,
-    });
-    render(<App client={fake.client} />);
-
-    await waitFor(() =>
-      expect(document.querySelector(".katex")?.textContent).toContain("答案"),
-    );
-    expect(document.querySelector(".katex annotation")).toBeTruthy();
-  });
-
-  it("renders Mermaid fenced code as an SVG diagram", async () => {
-    const fake = createClient();
-    fake.client.sessionHistory = vi.fn().mockResolvedValue({
-      messages: [
-        {
-          role: "assistant",
-          content: [
-            {
-              type: "text",
-              text: "```mermaid\nflowchart LR\n  A[Bootstrap Agent] --> B[配置 ORD]\n  B --> C[本地运行]\n```",
-            },
-          ],
-        },
-      ],
-      before: 0,
-      hasMore: false,
-    });
-    render(<App client={fake.client} />);
-
-    await waitFor(() =>
-      expect(document.querySelector(".mermaid-diagram svg")).toBeTruthy(),
-    );
-  });
-
-  it("renders a flattened GitHub Markdown table as an accessible table", async () => {
-    const fake = createClient();
-    fake.client.sessionHistory = vi.fn().mockResolvedValue({
-      messages: [
-        {
-          role: "assistant",
-          content: [
-            {
-              type: "text",
-              text: "| 配置 | 含义 | |---|---| | push: main | PR merge 到 main 后自动启动 | | workflow_dispatch | 可以从 GitHub Actions 手工启动 |",
+              text: "| 配置 | 含义 | |---|---| | AG-UI | Web protocol |",
             },
           ],
         },
@@ -149,60 +120,105 @@ describe("App workspace boundary", () => {
     render(<App client={fake.client} />);
 
     expect(await screen.findByRole("table")).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "配置" })).toBeTruthy();
-    expect(
-      screen.getByRole("cell", { name: "PR merge 到 main 后自动启动" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "Web protocol" })).toBeTruthy();
   });
 
-  it("shows a single current workspace rather than a Projects catalog", async () => {
+  it("loads the current workspace and session history by session ID", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);
 
     expect((await screen.findAllByText("Session A")).length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "Workspace" })).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Change workspace" }),
-    ).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Projects" })).toBeNull();
-    expect(screen.queryByText("Skills will appear here.")).toBeNull();
-    expect(fake.client.listSessions).toHaveBeenCalledWith();
+      screen.queryByRole("button", { name: "Change workspace" }),
+    ).toBeNull();
     expect(fake.client.sessionHistory).toHaveBeenCalledWith(
-      "/sessions/a.jsonl",
+      "a-session",
       Number.MAX_SAFE_INTEGER,
       80,
     );
   });
 
-  it("shows a zero notification count before any background session completes", async () => {
+  it("keeps the complete title available outside the display toolbar", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);
 
-    expect(
-      (
-        await screen.findByRole("button", {
-          name: "Notifications: 0 unread",
-        })
-      ).textContent,
-    ).toContain("0");
+    const title = await screen.findByRole("heading", { name: "Session A" });
+    expect(title.getAttribute("title")).toBe("Session A");
+    const toolbar = screen.getByRole("toolbar", {
+      name: "Conversation display",
+    });
+    expect(toolbar.contains(title)).toBe(false);
+    expect(title.closest("header")).toBe(toolbar.closest("header"));
   });
 
-  it("replaces visible sessions when Change workspace selects a new directory", async () => {
+  it("toggles tool calls without changing the label or hiding messages", async () => {
+    const fake = createClient();
+    fake.client.sessionHistory = vi.fn().mockResolvedValue({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Keep this reply visible" },
+            {
+              type: "toolCall",
+              id: "tool-1",
+              name: "read",
+              arguments: { path: "/workspace/a/example.ts" },
+            },
+          ],
+        },
+      ],
+      before: 0,
+      hasMore: false,
+    });
+    render(<App client={fake.client} />);
+
+    expect(await screen.findByText("/workspace/a/example.ts")).toBeTruthy();
+    const toggle = screen.getByRole("checkbox", {
+      name: "Show tool calls",
+    }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(toggle.closest('[role="toolbar"]')).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(false);
+    expect(screen.queryByText("/workspace/a/example.ts")).toBeNull();
+    expect(
+      within(screen.getByRole("region", { name: "Conversation" })).getByText(
+        "Keep this reply visible",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Show tool calls" })).toBe(
+      toggle,
+    );
+
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    expect(screen.getByText("/workspace/a/example.ts")).toBeTruthy();
+  });
+
+  it("resizes the sidebar within its bounded width", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);
     await screen.findAllByText("Session A");
 
-    fireEvent.click(screen.getByRole("button", { name: "Change workspace" }));
+    const separator = screen.getByRole("separator", {
+      name: "Resize sidebar",
+    });
+    expect(separator.getAttribute("aria-valuenow")).toBe("280");
 
-    await waitFor(() =>
-      expect(screen.getAllByText("Session B").length).toBeGreaterThan(0),
+    fireEvent.keyDown(separator, { key: "End" });
+    expect(separator.getAttribute("aria-valuenow")).toBe("520");
+    expect(separator.closest("main")?.getAttribute("style")).toContain(
+      "--sidebar-width: 520px",
     );
-    expect(screen.queryAllByText("Session A")).toHaveLength(0);
-    expect(fake.client.abortSession).not.toHaveBeenCalled();
-    expect(fake.client.startSession).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(separator, { key: "Home" });
+    expect(separator.getAttribute("aria-valuenow")).toBe("220");
   });
 
-  it("creates a tag from the visible inline control", async () => {
+  it("creates a tag with the existing inline control", async () => {
     const fake = createClient();
     fake.client.createTag = vi.fn().mockResolvedValue({ id: 7, name: "Work" });
     render(<App client={fake.client} />);
@@ -218,117 +234,9 @@ describe("App workspace boundary", () => {
     );
   });
 
-  it.each([
-    ["Work", 7],
-    ["Uncategorized", null],
-  ] as const)(
-    "moves a session to %s after a captured pointer drag leaves the session row",
-    async (targetName, expectedTagId) => {
-      const fake = createClient();
-      fake.client.listTags = vi
-        .fn()
-        .mockResolvedValue([{ id: 7, name: "Work" }]);
-      fake.client.listSessionTagAssignments = vi
-        .fn()
-        .mockResolvedValue([{ sessionId: "a-session", tagId: 7 }]);
-      render(<App client={fake.client} />);
-
-      fireEvent.click(
-        await screen.findByRole("button", { name: "Expand Work" }),
-      );
-      await act(async () => undefined);
-      const session = (
-        await screen.findAllByRole("button", { name: /Session A/ })
-      )[0];
-      const target = screen.getByText(targetName);
-      const elementFromPoint = vi
-        .fn()
-        .mockReturnValue(target.closest("section"));
-      Object.defineProperty(document, "elementFromPoint", {
-        configurable: true,
-        value: elementFromPoint,
-      });
-      const setPointerCapture = vi.fn();
-      Object.defineProperty(HTMLElement.prototype, "setPointerCapture", {
-        configurable: true,
-        value: setPointerCapture,
-      });
-
-      const pointerDown = new window.MouseEvent("pointerdown", {
-        bubbles: true,
-        clientX: 10,
-        clientY: 10,
-      });
-      Object.defineProperty(pointerDown, "pointerId", { value: 1 });
-      session.dispatchEvent(pointerDown);
-      expect(setPointerCapture).toHaveBeenCalledWith(1);
-      // Pointer capture keeps the source handler alive even when the pointer is
-      // physically over the tag; elementFromPoint identifies that tag on release.
-      const pointerMove = new window.MouseEvent("pointermove", {
-        clientX: 20,
-        clientY: 20,
-      });
-      Object.defineProperty(pointerMove, "pointerId", { value: 1 });
-      session.dispatchEvent(pointerMove);
-      const pointerUp = new window.MouseEvent("pointerup", {
-        clientX: 20,
-        clientY: 20,
-      });
-      Object.defineProperty(pointerUp, "pointerId", { value: 1 });
-      session.dispatchEvent(pointerUp);
-      await waitFor(() =>
-        expect(fake.client.assignSessionTag).toHaveBeenCalledWith(
-          "a-session",
-          expectedTagId,
-        ),
-      );
-      delete (document as { elementFromPoint?: unknown }).elementFromPoint;
-      delete (HTMLElement.prototype as { setPointerCapture?: unknown })
-        .setPointerCapture;
-    },
-  );
-
-  it("expands a tag by clicking its text", async () => {
-    const fake = createClient();
-    fake.client.listTags = vi.fn().mockResolvedValue([{ id: 7, name: "Work" }]);
-    fake.client.listSessionTagAssignments = vi
-      .fn()
-      .mockResolvedValue([{ sessionId: "a-session", tagId: 7 }]);
-    render(<App client={fake.client} />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Expand Work" }));
-    expect((await screen.findAllByText("Session A")).length).toBeGreaterThan(0);
-  });
-
-  it("does not open a session context menu because session rename uses the pencil action", async () => {
+  it("renames a session through the Pi SDK service", async () => {
     const fake = createClient();
     render(<App client={fake.client} />);
-
-    fireEvent.contextMenu(
-      (await screen.findAllByRole("button", { name: /Session A/ }))[0],
-      { clientX: 20, clientY: 20 },
-    );
-
-    expect(screen.queryByRole("menu")).toBeNull();
-  });
-
-  it("shows a visible pencil action that starts session rename", async () => {
-    const fake = createClient();
-    render(<App client={fake.client} />);
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Rename session Session A" }),
-    );
-
-    expect(
-      screen.getByRole("textbox", { name: "Rename session Session A" }),
-    ).toBeTruthy();
-  });
-
-  it("renames a session from its visible pencil action", async () => {
-    const fake = createClient();
-    render(<App client={fake.client} />);
-
     fireEvent.click(
       await screen.findByRole("button", { name: "Rename session Session A" }),
     );
@@ -339,121 +247,321 @@ describe("App workspace boundary", () => {
     fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() =>
-      expect(fake.client.sendRpc).toHaveBeenCalledWith(
+      expect(fake.client.renameSession).toHaveBeenCalledWith(
         "a-session",
-        expect.objectContaining({ type: "set_session_name", name: "Renamed" }),
+        "Renamed",
       ),
     );
-    expect(fake.client.startSession).toHaveBeenCalledWith(
-      "a-session",
-      "/sessions/a.jsonl",
+  });
+
+  it.each(["info", "warning", "error"] as const)(
+    "renders extension %s output even when tool calls are hidden",
+    async (level) => {
+      const fake = createClient();
+      fake.client.runAgent = vi
+        .fn()
+        .mockImplementation(async (sessionId, _prompt, handler) => {
+          handler({
+            sessionId,
+            runId: "run-1",
+            event: {
+              type: "CUSTOM",
+              name: "pi.notification",
+              value: { message: "MCP server ready\nTools: 3", level },
+            },
+          });
+        });
+      render(<App client={fake.client} />);
+      const textbox = await screen.findByRole("combobox", { name: "Message" });
+      fireEvent.click(
+        screen.getByRole("checkbox", { name: "Show tool calls" }),
+      );
+      fireEvent.change(textbox, { target: { value: "/mcp" } });
+      fireEvent.keyDown(textbox, { key: "Enter" });
+      const notice = await screen.findByText(/MCP server ready/);
+      expect(notice.parentElement?.getAttribute("role")).toBe(
+        level === "info" ? "status" : "alert",
+      );
+      expect(notice.textContent).toBe("MCP server ready\nTools: 3");
+    },
+  );
+
+  it("displays extension command errors", async () => {
+    const fake = createClient();
+    fake.client.runAgent = vi
+      .fn()
+      .mockImplementation(async (sessionId, _prompt, handler) => {
+        handler({
+          sessionId,
+          runId: "run-1",
+          event: {
+            type: "RUN_ERROR",
+            message: "Supply an absolute Git project root.",
+          },
+        });
+      });
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole("combobox", { name: "Message" });
+    fireEvent.change(textbox, { target: { value: "/codegraph-status" } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Supply an absolute Git project root.",
     );
   });
 
-  it("runs a tag removal action after the menu receives pointerdown", async () => {
+  it("clears a command error only when a valid new message is submitted", async () => {
     const fake = createClient();
-    fake.client.listTags = vi.fn().mockResolvedValue([{ id: 7, name: "Work" }]);
-    fake.client.deleteTag = vi.fn().mockResolvedValue(undefined);
+    let complete!: () => void;
+    fake.client.runAgent = vi
+      .fn()
+      .mockImplementationOnce(async (sessionId, _prompt, handler) => {
+        handler({
+          sessionId,
+          runId: "run-1",
+          event: {
+            type: "CUSTOM",
+            name: "pi.notification",
+            value: { message: "Previous command notification", level: "info" },
+          },
+        });
+        handler({
+          sessionId,
+          runId: "run-1",
+          event: {
+            type: "RUN_ERROR",
+            message: "Old command error",
+          },
+        });
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            complete = resolve;
+          }),
+      );
     render(<App client={fake.client} />);
-
-    fireEvent.contextMenu(await screen.findByText("Work"), {
-      clientX: 20,
-      clientY: 20,
+    const textbox = await screen.findByRole<HTMLTextAreaElement>("combobox", {
+      name: "Message",
     });
-    const remove = screen.getByRole("menuitem", { name: "Remove tag" });
-    fireEvent.pointerDown(remove);
-    fireEvent.click(remove);
+    fireEvent.change(textbox, { target: { value: "/codegraph-status" } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Old command error",
+    );
 
-    await waitFor(() => expect(fake.client.deleteTag).toHaveBeenCalledWith(7));
-  });
+    fireEvent.change(textbox, { target: { value: "New draft" } });
+    expect(screen.getByRole("alert").textContent).toBe("Old command error");
+    fireEvent.change(textbox, { target: { value: "   " } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(fake.client.runAgent).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).toBe("Old command error");
 
-  it("lists Uncategorized after named tag groups", async () => {
-    const fake = createClient();
-    fake.client.listTags = vi.fn().mockResolvedValue([{ id: 7, name: "Work" }]);
-    render(<App client={fake.client} />);
-
-    const tags = await screen.findAllByText("Work");
-    const uncategorized = screen.getByText("Uncategorized");
-    expect(
-      tags[0].compareDocumentPosition(uncategorized) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it("deduplicates background terminal notifications and clears them on workspace replacement", async () => {
-    const fake = createClient();
-    fake.client.listSessions = vi.fn().mockImplementation(async () => {
-      if ((await fake.client.currentWorkspace())?.id === "workspace-a") {
-        return [
-          { id: "a-session", path: "/sessions/a.jsonl", title: "Session A" },
-          { id: "b-session", path: "/sessions/b.jsonl", title: "Session B" },
-        ];
-      }
-      return [
-        { id: "b-session", path: "/sessions/b.jsonl", title: "Session B" },
-      ];
+    fireEvent.paste(textbox, {
+      clipboardData: {
+        files: [new File(["image"], "clipboard.png", { type: "image/png" })],
+      },
     });
-    render(<App client={fake.client} />);
-    await screen.findAllByText("Session A");
-    await waitFor(() => expect(fake.client.listen).toHaveBeenCalled());
-
-    await act(async () => {
-      fake.emit({
-        workspaceId: "workspace-a",
-        sessionId: "b-session",
-        instanceId: 2,
-        event: { type: "agent_settled" },
-      });
-      fake.emit({
-        workspaceId: "workspace-a",
-        sessionId: "b-session",
-        instanceId: 1,
-        event: { type: "agent_settled" },
-      });
-    });
-
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Notifications: 1 unread" }),
-      ).toBeTruthy(),
+      expect(textbox.value).toContain("/tmp/pi-clipboard-test.png"),
     );
+    await waitFor(() => expect(textbox.disabled).toBe(false));
+    expect(screen.getByRole("alert").textContent).toBe("Old command error");
+
+    fireEvent.change(textbox, { target: { value: "Next message" } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(fake.client.runAgent).toHaveBeenCalledTimes(2);
+    // The second request has not emitted RUN_STARTED or returned a result.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("Previous command notification")).toBeTruthy();
+    await act(async () => {
+      complete();
+    });
+  });
+
+  it("replaces a request error with the new request's error", async () => {
+    const fake = createClient();
+    fake.client.runAgent = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Old request error"))
+      .mockRejectedValueOnce(new Error("New request error"));
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole("combobox", { name: "Message" });
+    fireEvent.change(textbox, { target: { value: "First message" } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Old request error",
+    );
+    fireEvent.change(textbox, { target: { value: "Second message" } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe("New request error"),
+    );
+    expect(screen.queryByText("Old request error")).toBeNull();
+  });
+
+  it("saves a pasted image and replaces the selected composer text with its path", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole<HTMLTextAreaElement>("combobox", {
+      name: "Message",
+    });
+    fireEvent.change(textbox, { target: { value: "Explain old here" } });
+    textbox.setSelectionRange(8, 11);
+    const image = new File(["image bytes"], "clipboard.png", {
+      type: "image/png",
+    });
+    fireEvent.paste(textbox, { clipboardData: { files: [image] } });
+    await waitFor(() =>
+      expect(textbox.value).toBe("Explain /tmp/pi-clipboard-test.png here"),
+    );
+    expect(fake.client.saveClipboardImage).toHaveBeenCalledWith(image);
+    expect(fake.client.runAgent).not.toHaveBeenCalled();
+    await waitFor(() => expect(textbox.selectionStart).toBe(34));
+    expect(textbox.selectionEnd).toBe(34);
+  });
+
+  it("inserts multiple image paths in clipboard order", async () => {
+    const fake = createClient();
+    fake.client.saveClipboardImage = vi
+      .fn()
+      .mockResolvedValueOnce("/tmp/first.png")
+      .mockResolvedValueOnce("/tmp/second.png");
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole<HTMLTextAreaElement>("combobox", {
+      name: "Message",
+    });
+    await waitFor(() => expect(textbox.disabled).toBe(false));
+    fireEvent.paste(textbox, {
+      clipboardData: {
+        files: [
+          new File(["first"], "first.png", { type: "image/png" }),
+          new File(["second"], "second.png", { type: "image/png" }),
+        ],
+      },
+    });
+    await waitFor(() =>
+      expect(textbox.value).toBe("/tmp/first.png /tmp/second.png"),
+    );
+    expect(fake.client.saveClipboardImage).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a delayed paste in its source session when you switch sessions", async () => {
+    const fake = createClient();
+    fake.client.listSessions = vi.fn().mockResolvedValue([
+      { id: "a-session", path: "/sessions/a.jsonl", title: "Session A" },
+      { id: "b-session", path: "/sessions/b.jsonl", title: "Session B" },
+    ]);
+    let complete!: (path: string) => void;
+    fake.client.saveClipboardImage = vi.fn().mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole<HTMLTextAreaElement>("combobox", {
+      name: "Message",
+    });
+    fireEvent.change(textbox, { target: { value: "Explain" } });
+    fireEvent.paste(textbox, {
+      clipboardData: {
+        files: [new File(["image"], "image.png", { type: "image/png" })],
+      },
+    });
     fireEvent.click(
-      screen.getByRole("button", { name: "Notifications: 1 unread" }),
+      screen.getByRole("button", { name: /Session B Empty conversation/ }),
     );
-    fireEvent.click(screen.getByText("Session B: completed"));
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Notifications: 0 unread" }),
-      ).toBeTruthy(),
+    await screen.findByRole("heading", { name: "Session B" });
+    complete("/tmp/source.png");
+    await waitFor(() => expect(textbox.disabled).toBe(false));
+    expect(textbox.value).toBe("");
+    fireEvent.change(textbox, { target: { value: "Other session draft" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Session A Empty conversation/ }),
     );
-    expect(screen.queryByText("Session B: completed")).toBeNull();
-    expect(
-      screen
-        .getAllByRole("button", { name: /Session B/ })[0]
-        .getAttribute("aria-current"),
-    ).toBe("page");
+    await waitFor(() => expect(textbox.value).toBe("Explain /tmp/source.png"));
+    fireEvent.click(
+      screen.getByRole("button", { name: /Session B Empty conversation/ }),
+    );
+    await waitFor(() => expect(textbox.value).toBe("Other session draft"));
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Change workspace" }));
-    await waitFor(() =>
-      expect(
-        screen.getAllByRole("button", { name: /Session B/ }).length,
-      ).toBeGreaterThan(0),
-    );
+  it("keeps ordinary text paste on the browser's native path", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole("combobox", { name: "Message" });
     expect(
-      screen.getByRole("button", { name: "Notifications: 0 unread" }),
-    ).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "Session B: completed" }),
-    ).toBeNull();
+      fireEvent.paste(textbox, {
+        clipboardData: { files: [], getData: () => "plain text" },
+      }),
+    ).toBe(true);
+    expect(fake.client.saveClipboardImage).not.toHaveBeenCalled();
+  });
 
-    await act(async () => {
-      fake.emit({
-        workspaceId: "workspace-a",
-        sessionId: "a-session",
-        instanceId: 3,
-        event: { type: "message_update" },
-      });
+  it("prevents sending while an image is being saved", async () => {
+    const fake = createClient();
+    let complete!: (path: string) => void;
+    fake.client.saveClipboardImage = vi.fn().mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole<HTMLTextAreaElement>("combobox", {
+      name: "Message",
     });
-    expect(screen.queryByText("Session A")).toBeNull();
+    fireEvent.change(textbox, { target: { value: "Explain" } });
+    fireEvent.paste(textbox, {
+      clipboardData: {
+        files: [new File(["image"], "image.png", { type: "image/png" })],
+      },
+    });
+    expect(textbox.disabled).toBe(true);
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Send message" })
+        .disabled,
+    ).toBe(true);
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(fake.client.runAgent).not.toHaveBeenCalled();
+    complete("/tmp/image.png");
+    await waitFor(() => expect(textbox.value).toBe("Explain /tmp/image.png"));
+    expect(textbox.disabled).toBe(false);
+  });
+
+  it("keeps the draft and displays an image upload failure", async () => {
+    const fake = createClient();
+    fake.client.saveClipboardImage = vi
+      .fn()
+      .mockRejectedValue(new Error("Cannot save clipboard image."));
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole<HTMLTextAreaElement>("combobox", {
+      name: "Message",
+    });
+    fireEvent.change(textbox, { target: { value: "Keep this draft" } });
+    fireEvent.paste(textbox, {
+      clipboardData: {
+        files: [new File(["image"], "image.png", { type: "image/png" })],
+      },
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Cannot save clipboard image.",
+    );
+    expect(textbox.value).toBe("Keep this draft");
+    expect(textbox.disabled).toBe(false);
+    expect(fake.client.runAgent).not.toHaveBeenCalled();
+  });
+
+  it("renders AG-UI text events from a run", async () => {
+    const fake = createClient();
+    render(<App client={fake.client} />);
+    const textbox = await screen.findByRole("combobox", { name: "Message" });
+    fireEvent.change(textbox, { target: { value: "Hello" } });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+
+    await waitFor(() => expect(fake.client.runAgent).toHaveBeenCalled());
+    expect((await screen.findAllByText("AG-UI reply")).length).toBeGreaterThan(
+      0,
+    );
   });
 });

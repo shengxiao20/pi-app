@@ -1,0 +1,1294 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Pi → AG-UI · 实际事件映射</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        color: #e6edf5;
+        background: #101722;
+        --line: #35465e;
+        --blue: #81b9ff;
+        --orange: #ffca86;
+        --purple: #c6acff;
+        --red: #ffb2b2;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1240px;
+        margin: auto;
+        padding: 40px 28px 56px;
+      }
+      h1 {
+        margin: 12px 0;
+        font-size: clamp(28px, 4vw, 42px);
+      }
+      h2 {
+        margin: 0 0 16px;
+        font-size: 23px;
+      }
+      h3 {
+        font-size: 17px;
+        margin: 0 0 12px;
+      }
+      p,
+      li {
+        line-height: 1.7;
+      }
+      p {
+        margin: 8px 0;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      pre {
+        overflow-x: auto;
+        line-height: 1.6;
+        font-size: 13px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      a {
+        color: var(--blue);
+      }
+      .eyebrow {
+        color: var(--blue);
+        font-size: 12px;
+        letter-spacing: 0.1em;
+      }
+      .muted,
+      small {
+        color: #b3c0d2;
+      }
+      .intro {
+        max-width: 850px;
+      }
+      .section {
+        margin-top: 32px;
+        padding: 24px;
+        background: #182230;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+      }
+      .legend {
+        display: flex;
+        gap: 10px 22px;
+        flex-wrap: wrap;
+        margin: 20px 0;
+        font-size: 13px;
+      }
+      .legend span::before {
+        content: "";
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        margin-right: 8px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .stream {
+        color: var(--blue);
+      }
+      .preprocess {
+        color: var(--orange);
+      }
+      .side {
+        color: var(--purple);
+      }
+      .failure {
+        color: var(--red);
+      }
+      .scroll {
+        overflow-x: auto;
+      }
+      .pipeline {
+        display: flex;
+        min-width: 860px;
+        align-items: center;
+        gap: 12px;
+      }
+      .pipeline .node {
+        flex: 1;
+        padding: 14px 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: #111b28;
+        font-size: 14px;
+      }
+      .pipeline small {
+        display: block;
+        margin-top: 6px;
+        font-size: 11px;
+      }
+      .branch {
+        margin: 16px 0 22px;
+        padding: 16px;
+        border: 1px dashed #a77d48;
+        border-radius: 9px;
+        background: #2b251f;
+      }
+      .branch strong {
+        color: var(--orange);
+      }
+      .branch p {
+        font-size: 13px;
+      }
+      .map-head,
+      .map-row {
+        display: grid;
+        grid-template-columns: 1.15fr 1fr 1.15fr;
+        gap: 14px;
+        min-width: 860px;
+      }
+      .map-head {
+        padding: 0 12px 12px;
+        font-size: 12px;
+        color: #b3c0d2;
+      }
+      .map-row {
+        padding: 14px 12px;
+        margin-bottom: 9px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: #111b28;
+        transition: opacity 0.15s;
+      }
+      .map-row[data-selected="false"] {
+        opacity: 0.75;
+      }
+      .map-row[data-selected="true"] {
+        border-color: currentColor;
+      }
+      .map-row .translation {
+        font-size: 13px;
+        align-self: center;
+      }
+      .translation::before {
+        content: "→ ";
+      }
+      .translation::after {
+        content: " →";
+      }
+      .map-row code {
+        font-size: 13px;
+      }
+      .map-row small {
+        display: block;
+        font-size: 12px;
+        margin-top: 5px;
+      }
+      .map-row p {
+        margin: 2px 0;
+        color: #dbe5f3;
+        font-size: 13px;
+      }
+      .callout {
+        border-left: 3px solid var(--orange);
+        padding-left: 14px;
+        margin-top: 16px;
+        font-size: 13px;
+      }
+      .scenario-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 16px 0;
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+        color: #dce8f8;
+        background: #111b28;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 12px;
+      }
+      button:hover {
+        border-color: #8ea9cb;
+      }
+      button:focus-visible,
+      a:focus-visible {
+        outline: 3px solid var(--orange);
+        outline-offset: 3px;
+      }
+      button[aria-pressed="true"],
+      button[aria-current="step"] {
+        border-color: var(--blue);
+        background: #253e5d;
+      }
+      #scenario-title {
+        margin-top: 24px;
+      }
+      #scenario-note {
+        min-height: 48px;
+      }
+      #sequence {
+        display: block;
+        width: 100%;
+        min-width: 900px;
+      }
+      .inspection {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-top: 20px;
+      }
+      .inspection > div {
+        min-width: 0;
+        background: #111b28;
+        border: 1px solid var(--line);
+        padding: 16px;
+        border-radius: 9px;
+      }
+      #step-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .notes {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+      details {
+        padding: 16px 0;
+        border-top: 1px solid var(--line);
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      footer {
+        margin-top: 24px;
+        font-size: 12px;
+        line-height: 1.8;
+        color: #b3c0d2;
+      }
+      @media (max-width: 720px) {
+        main {
+          padding: 24px 14px 40px;
+        }
+        .section {
+          padding: 18px 14px;
+        }
+        .inspection,
+        .notes {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .map-row {
+          transition: none;
+        }
+      }
+      @media print {
+        body {
+          background: white;
+          color: black;
+        }
+        .section,
+        .map-row,
+        .pipeline .node,
+        .inspection > div {
+          background: white;
+          color: black;
+        }
+        .map-row[data-selected] {
+          opacity: 1;
+        }
+        .scroll {
+          overflow: visible;
+        }
+        .scenario-controls,
+        #step-controls {
+          display: none;
+        }
+        small,
+        .muted,
+        footer {
+          color: #333;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="eyebrow">PI APP · IMPLEMENTATION MAP · SDK 1.5.0</span>
+        <h1>Pi 事件 → AG-UI 协议</h1>
+        <p class="intro">
+          这是当前适配器的实际映射，不是完整 AG-UI
+          能力清单。蓝色是事件流，橙色是模型运行前的分支，紫色是独立 HTTP /
+          扩展反馈，红色是错误出口。
+        </p>
+        <p class="muted intro">
+          先看主链路，再选场景。<code>/skill:&lt;name&gt;</code> 是 SDK
+          文本展开，不是专用 AG-UI 事件，也不是独立技能 HTTP 接口。
+        </p>
+      </header>
+
+      <section class="section" aria-labelledby="map-title">
+        <h2 id="map-title">1. 主链路和映射图</h2>
+        <p class="muted">
+          选场景后高亮相关映射。变淡的行仍属于完整映射，只是当前场景不涉及。窄屏可横向滚动主链路、映射行和时序图。
+        </p>
+        <div class="legend" aria-label="图例">
+          <span class="stream">AG-UI / SSE</span
+          ><span class="preprocess">SDK 预处理</span
+          ><span class="side">HTTP / 反馈旁路</span
+          ><span class="failure">错误</span>
+        </div>
+        <div class="scroll">
+          <div class="pipeline" aria-label="调用关系">
+            <div class="node">
+              React / PiClient<small>先获取完整 canonical messages</small>
+            </div>
+            <span aria-hidden="true">→</span>
+            <div class="node">
+              HTTP router<small>POST /api/agent · 历史校验 · 锁</small>
+            </div>
+            <span aria-hidden="true">→</span>
+            <div class="node">
+              AgentSession.prompt<small>SDK 在服务进程内执行</small>
+            </div>
+            <span aria-hidden="true">→</span>
+            <div class="node">
+              AgUiEventWriter<small>Session events + ExtensionFeedback</small>
+            </div>
+            <span aria-hidden="true">→</span>
+            <div class="node">
+              SSE → React<small>展示文字、工具、通知和状态</small>
+            </div>
+          </div>
+        </div>
+        <div class="branch" data-map="preflight">
+          <strong>↳ prompt 内部先分流，再决定是否调用模型</strong>
+          <p>
+            已注册扩展命令 → handler 执行并返回。未匹配 →
+            <code>input</code> 处理器（可消费 / 改写）→
+            <code>/skill:name</code> 展开 → prompt template 展开 →
+            检查模型和认证 → 普通 agent run。
+          </p>
+          <p>
+            外层 <code>RUN_STARTED</code> 已在
+            <code>prompt()</code>
+            前发出。命令可以主动运行模型，但通知型命令无需模型响应。
+          </p>
+        </div>
+        <div class="scroll" role="group" aria-label="事件映射关系">
+          <div class="map-head">
+            <span>来源：Pi / HTTP / ExtensionFeedback</span
+            ><span>转换规则：箭头表示语义转换</span
+            ><span>输出：AG-UI / 独立 HTTP</span>
+          </div>
+          <div class="map-row stream" data-map="start">
+            <div>
+              <code>HTTP wrapper: writer.start(input)</code
+              ><small>不是 agent_start 映射</small>
+            </div>
+            <div class="translation">校验通过后，开始 SSE</div>
+            <div>
+              <code>RUN_STARTED</code>
+              <p>threadId · runId · input</p>
+            </div>
+          </div>
+          <div class="map-row stream" data-map="text">
+            <div>
+              <code>message_update / text_delta</code
+              ><small>只转发文字增量</small>
+            </div>
+            <div class="translation">首个 delta 开消息；随后追加</div>
+            <div>
+              <code>TEXT_MESSAGE_START<br />TEXT_MESSAGE_CONTENT</code>
+              <p>生成 messageId · 保留 delta</p>
+            </div>
+          </div>
+          <div class="map-row stream" data-map="tool-start">
+            <div>
+              <code>tool_execution_start</code
+              ><small>toolCallId · toolName · args</small>
+            </div>
+            <div class="translation">一次输出完整 JSON 参数</div>
+            <div>
+              <code>TOOL_CALL_START<br />TOOL_CALL_ARGS<br />TOOL_CALL_END</code
+              ><small>END = 参数完成，不是执行完成</small>
+            </div>
+          </div>
+          <div class="map-row stream" data-map="tool-end">
+            <div>
+              <code>tool_execution_end</code><small>result · isError</small>
+            </div>
+            <div class="translation">提取文本；保留工具错误标记</div>
+            <div>
+              <code>TOOL_CALL_RESULT</code>
+              <p>生成结果 messageId · 保留 toolCallId</p>
+              <small>工具失败本身不强制 RUN_ERROR</small>
+            </div>
+          </div>
+          <div class="map-row stream" data-map="close-text">
+            <div>
+              <code>tool start / finish / fail</code
+              ><small>仅当文字消息仍打开</small>
+            </div>
+            <div class="translation">关闭当前文字消息</div>
+            <div>
+              <code>TEXT_MESSAGE_END</code
+              ><small>不是 Pi message_end 映射</small>
+            </div>
+          </div>
+          <div class="map-row side" data-map="notify">
+            <div>
+              <code>ctx.ui.notify(message, level)</code
+              ><small>ExtensionFeedback，不是 session 文字流</small>
+            </div>
+            <div class="translation">实时反馈；启动通知等订阅后发出</div>
+            <div>
+              <code>CUSTOM / pi.notification</code>
+              <p>value = { message, level }</p>
+              <small>仅展示，不进入 Pi 模型历史</small>
+            </div>
+          </div>
+          <div class="map-row side" data-map="buffered-error">
+            <div>
+              <code>订阅前缓存的 extension error</code
+              ><small>例如 session_start 错误</small>
+            </div>
+            <div class="translation">作为旧错误通知交付</div>
+            <div>
+              <code>CUSTOM / pi.notification</code>
+              <p>level = "error"</p>
+              <small>不归因于下一条命令</small>
+            </div>
+          </div>
+          <div class="map-row failure" data-map="run-error">
+            <div>
+              <code>活动 extension error / prompt reject</code
+              ><small>不支持的 UI 方法会明确报错</small>
+            </div>
+            <div class="translation">
+              扩展错误在 finish 时汇总；拒绝直接 fail
+            </div>
+            <div>
+              <code>RUN_ERROR</code>
+              <p>message · SSE 终止</p>
+              <small>HTTP 已是 200，不再改状态码</small>
+            </div>
+          </div>
+          <div class="map-row stream" data-map="finish">
+            <div>
+              <code>agent_settled + prompt resolves</code
+              ><small>settled 只更新 aborted；本身不立即发出终止事件</small>
+            </div>
+            <div class="translation">writer.finish 检查错误和未完成工具</div>
+            <div>
+              <code>RUN_FINISHED</code>
+              <p>outcome.type = success / cancelled</p>
+              <small>success 不是完整 SDK outcome 认证</small>
+            </div>
+          </div>
+          <div class="map-row failure" data-map="http-error">
+            <div>
+              <code>SSE 前：输入 / 历史 / 会话打开失败</code
+              ><small>同会话活动锁冲突是 409</small>
+            </div>
+            <div class="translation">尚未开始 SSE，不产生 RUN_ERROR</div>
+            <div>
+              <code>HTTP JSON error { message }</code>
+              <p>未捕获校验异常当前为 500</p>
+            </div>
+          </div>
+          <div class="map-row side" data-map="http-side">
+            <div>
+              <code>工作区 / 会话 / 历史 / 命令发现 / 标签 / 图片 / abort</code
+              ><small>PiClient 普通 HTTP API</small>
+            </div>
+            <div class="translation">不经过 AgUiEventWriter</div>
+            <div>
+              <code>HTTP JSON / 204</code
+              ><small>abort 用 HTTP 提交，运行结果仍在原 SSE 流</small>
+            </div>
+          </div>
+          <div class="map-row muted" data-map="ignored">
+            <div>
+              <code>thinking_* / toolcall_* / tool_execution_update</code
+              ><small>其他生命周期、重试、压缩、队列事件亦未转发</small>
+            </div>
+            <div class="translation">适配器不生成对应输出</div>
+            <div>
+              <code>无专用 AG-UI 事件</code
+              ><small>SDK 可以执行这些操作；前端没有独立展示</small>
+            </div>
+          </div>
+        </div>
+        <p class="callout">
+          扩展钩子（如 <code>before_agent_start</code>）不等于
+          <code>session.subscribe</code> 的事件。钩子可以通过
+          <code>notify</code> 或 <code>onError</code> 进入反馈旁路，不能把所有
+          Pi 事件直接连到 AG-UI。
+        </p>
+      </section>
+
+      <section class="section" aria-labelledby="scenarios-title">
+        <h2 id="scenarios-title">2. 选场景，看时序与数据变化</h2>
+        <p class="muted">
+          这些是基于代码的示例，不是实时日志。下方状态键用于说明，不是新增协议字段。点击步骤可前进或回看。
+        </p>
+        <div class="scenario-controls" aria-label="选择运行场景">
+          <button type="button" data-scenario="text" aria-pressed="true">
+            普通文字
+          </button>
+          <button type="button" data-scenario="tool" aria-pressed="false">
+            工具执行
+          </button>
+          <button type="button" data-scenario="skill" aria-pressed="false">
+            /skill:name
+          </button>
+          <button type="button" data-scenario="command" aria-pressed="false">
+            通知型命令
+          </button>
+          <button type="button" data-scenario="handled" aria-pressed="false">
+            input 消费
+          </button>
+          <button
+            type="button"
+            data-scenario="extensionError"
+            aria-pressed="false"
+          >
+            扩展失败
+          </button>
+          <button
+            type="button"
+            data-scenario="historyError"
+            aria-pressed="false"
+          >
+            历史不匹配
+          </button>
+          <button type="button" data-scenario="cancel" aria-pressed="false">
+            取消运行
+          </button>
+          <button type="button" data-scenario="image" aria-pressed="false">
+            粘贴图片
+          </button>
+        </div>
+        <h3 id="scenario-title"></h3>
+        <p id="scenario-note" aria-live="polite"></p>
+        <div class="scroll">
+          <svg
+            id="sequence"
+            role="img"
+            aria-label="当前场景的多参与者时序图"
+          ></svg>
+        </div>
+        <div id="step-controls" aria-label="选择时序步骤"></div>
+        <div class="inspection">
+          <div>
+            <h3>当前步骤的 diff</h3>
+            <pre id="payload-diff" aria-live="polite"></pre>
+          </div>
+          <div>
+            <h3>截至当前步骤的状态</h3>
+            <pre id="payload-state"></pre>
+          </div>
+        </div>
+        <noscript
+          ><p class="failure">
+            场景交互需要 JavaScript。上方静态映射图仍可阅读。
+          </p></noscript
+        >
+      </section>
+
+      <section class="section" aria-labelledby="limits-title">
+        <h2 id="limits-title">3. 不能混淆的边界</h2>
+        <div class="notes">
+          <div>
+            <h3>技能展开 ≠ 独立旁路运行</h3>
+            <p>
+              <code>/skill:name</code> 先变成
+              <code>&lt;skill&gt;…&lt;/skill&gt;</code> user
+              text，再运行模型。展开文件读取不是工具调用。
+            </p>
+            <p>
+              模型在普通运行中选择读取技能文件，是另一种情况：那次读取会显示为普通工具执行。
+            </p>
+          </div>
+          <div>
+            <h3>HTTP 接受 ≠ 扩展成功</h3>
+            <p>
+              HTTP 200 仅说明 SSE 已开始。命令异常可能被 SDK 捕获，但
+              <code>onError</code> 仍让适配器最终输出 <code>RUN_ERROR</code>。
+            </p>
+            <p>
+              单独的 error
+              级通知不是运行失败；缓存的旧扩展错误也不让新命令失败。
+            </p>
+          </div>
+        </div>
+        <details>
+          <summary>未知技能和技能文件读取失败</summary>
+          <p>
+            当前 SDK 对未知 <code>/skill:name</code> 保留原文。裸
+            <code>/skill</code> 没有内置展开。技能文件读取失败会报告
+            <code>skill_expansion</code
+            >，但返回原文，模型仍可能运行；适配器最后报告扩展错误。Pi App
+            没有新增预检拒绝或自动重试。
+          </p>
+        </details>
+        <details>
+          <summary>UI、错误横幅与通知历史</summary>
+          <p>
+            <code>ctx.ui.notify</code> 可用。对话框、编辑器、widget、theme
+            等方法明确不支持。terminal widget 必须检查
+            <code>ctx.mode === "tui"</code>，不能只检查 <code>ctx.hasUI</code>。
+          </p>
+          <p>
+            通知不写入 Pi
+            历史，刷新网页后不恢复。旧错误横幅在下一次有效提交时清除；输入、空提交、粘贴图片都不清除。
+          </p>
+        </details>
+        <details>
+          <summary>取消、断线和运行成功的含义</summary>
+          <p>
+            HTTP abort 请求本身返回 204。适配器从
+            <code>agent_settled.aborted</code> 记录取消，并在 prompt 完成后输出
+            cancelled。断开浏览器不自动取消模型运行，也没有 SSE 重放接口。
+          </p>
+          <p>
+            工具结果带 error 不一定使运行失败。适配器不映射 SDK 的完整
+            outcome，只检查捕获的异常、活动扩展错误、工具结果完整性和 aborted。
+          </p>
+        </details>
+        <details>
+          <summary>图片上传和历史权威</summary>
+          <p>
+            图片走独立二进制 HTTP 上传：PNG/JPEG/GIF/WebP，最多 20
+            MiB，文件头校验，随机临时文件，0600
+            权限。只把绝对路径插入草稿，没有附件预览或自动模型图片消息。
+          </p>
+          <p>
+            运行前获取完整 canonical AG-UI 投影，深比较历史并追加一个新 user
+            消息。canonical 仅投影文字和工具消息，不等于 Pi 完整模型上下文。
+          </p>
+        </details>
+      </section>
+
+      <footer>
+        <strong>代码依据（仓库相对路径）</strong><br />
+        <code>desktop/server/agui-adapter.ts</code>：start / accept /
+        acceptFeedback / finish / fail<br />
+        <code>desktop/server/index.ts</code>：/api/agent 请求包装器、HTTP
+        旁路和状态码<br />
+        <code>desktop/server/session-registry.ts</code>：canonicalMessages /
+        resourceCommands / bindExtensions<br />
+        <code>desktop/server/extension-feedback.ts</code> +
+        <code>desktop/shared/extension-feedback.ts</code>：通知、缓存与显式 UI
+        错误<br />
+        <code>desktop/src/pi-client.ts</code> +
+        <code>desktop/src/App.tsx</code>：canonical 请求、AG-UI
+        消费、上传和草稿<br />
+        Pi SDK 1.5.0 <code>dist/core/agent-session.js</code>：prompt /
+        _tryExecuteExtensionCommand / _runInputHandlers / _expandSkillCommand<br />
+        此图不执行 API 请求，不加载外部资源。升级 SDK 或适配器后需要重新核对。
+      </footer>
+    </main>
+    <script>
+      "use strict";
+      (() => {
+        const started = {
+          type: "RUN_STARTED",
+          threadId: "session-1",
+          runId: "run-1",
+          input: {
+            threadId: "session-1",
+            runId: "run-1",
+            state: {},
+            messages: [{ id: "user-1", role: "user", content: "" }],
+            tools: [],
+            context: [],
+            forwardedProps: {},
+          },
+        };
+        const finished = {
+          type: "RUN_FINISHED",
+          threadId: "session-1",
+          runId: "run-1",
+          outcome: { type: "success" },
+        };
+        const content = [
+          {
+            type: "TEXT_MESSAGE_START",
+            messageId: "live-1",
+            role: "assistant",
+          },
+          { type: "TEXT_MESSAGE_CONTENT", messageId: "live-1", delta: "Done." },
+        ];
+        const initialState = {
+          httpStatus: null,
+          rawPrompt: null,
+          sdkPrompt: null,
+          modelActivity: null,
+          lastEvents: null,
+          filePath: null,
+          draft: null,
+        };
+        const preflight = (text) => [
+          {
+            from: 0,
+            to: 1,
+            label: "POST /api/agent",
+            patch: { rawPrompt: text, modelActivity: "尚未调用" },
+          },
+          {
+            from: 1,
+            to: 1,
+            label: "parse + canonical history + lock",
+            patch: { httpStatus: "校验通过；尚未开始 SSE" },
+          },
+          {
+            from: 1,
+            to: 3,
+            label: "writer.start → RUN_STARTED",
+            patch: {
+              httpStatus: 200,
+              lastEvents: [
+                {
+                  ...started,
+                  input: {
+                    ...started.input,
+                    messages: [{ id: "user-1", role: "user", content: text }],
+                  },
+                },
+              ],
+            },
+          },
+          {
+            from: 1,
+            to: 2,
+            label: "session.prompt(raw text)",
+            patch: { sdkPrompt: text },
+          },
+        ];
+        const completion = [
+          {
+            from: 2,
+            to: 3,
+            label: "agent_settled: aborted=false",
+            patch: { modelActivity: "SDK 已 settled；writer 尚未终止" },
+          },
+          {
+            from: 1,
+            to: 3,
+            label: "prompt resolves → writer.finish",
+            patch: {
+              lastEvents: [
+                { type: "TEXT_MESSAGE_END", messageId: "live-1" },
+                finished,
+              ],
+            },
+          },
+          {
+            from: 3,
+            to: 0,
+            label: "SSE → React 展示终止状态",
+            patch: { modelActivity: "完成；无重放接口" },
+          },
+        ];
+        const scenarios = {
+          text: {
+            title: "普通文字：按 delta 开消息，按 wrapper 结束运行",
+            note: "RUN_STARTED 来自 HTTP 包装器，TEXT_MESSAGE_START 来自首个 text_delta；不是 Pi agent_start 或 message_start 的逐项映射。",
+            maps: ["start", "text", "close-text", "finish"],
+            steps: [
+              ...preflight("Summarize the project."),
+              {
+                from: 2,
+                to: 3,
+                label: "message_update / text_delta",
+                patch: { modelActivity: "普通 agent run", lastEvents: content },
+              },
+              ...completion,
+            ],
+          },
+          tool: {
+            title: "工具：TOOL_CALL_END 先于执行结果",
+            note: "示例包含前置文字，所以 parentMessageId 是 live-1。参数一次输出，执行结果稍后到达；tool_execution_update 不转发。",
+            maps: [
+              "start",
+              "text",
+              "tool-start",
+              "tool-end",
+              "close-text",
+              "finish",
+              "ignored",
+            ],
+            steps: [
+              ...preflight("Read README.md."),
+              {
+                from: 2,
+                to: 3,
+                label: "text_delta → open live-1",
+                patch: { modelActivity: "普通 agent run", lastEvents: content },
+              },
+              {
+                from: 2,
+                to: 3,
+                label: "tool_execution_start",
+                patch: {
+                  lastEvents: [
+                    { type: "TEXT_MESSAGE_END", messageId: "live-1" },
+                    {
+                      type: "TOOL_CALL_START",
+                      toolCallId: "tool-1",
+                      toolCallName: "read",
+                      parentMessageId: "live-1",
+                    },
+                    {
+                      type: "TOOL_CALL_ARGS",
+                      toolCallId: "tool-1",
+                      delta: '{"path":"README.md"}',
+                    },
+                    { type: "TOOL_CALL_END", toolCallId: "tool-1" },
+                  ],
+                },
+              },
+              {
+                from: 2,
+                to: 3,
+                label: "tool_execution_end",
+                patch: {
+                  lastEvents: [
+                    {
+                      type: "TOOL_CALL_RESULT",
+                      messageId: "result-1",
+                      toolCallId: "tool-1",
+                      content: "# Pi App\n...",
+                    },
+                  ],
+                },
+              },
+              {
+                from: 2,
+                to: 3,
+                label: "agent_settled: aborted=false",
+                patch: { modelActivity: "无未完成工具" },
+              },
+              {
+                from: 1,
+                to: 3,
+                label: "prompt resolves → writer.finish",
+                patch: { lastEvents: [finished] },
+              },
+            ],
+          },
+          skill: {
+            title: "/skill:review：展开是预处理，随后仍走普通 run",
+            note: "假设已发现 review 技能。读取 SKILL.md 不生成工具事件。展开后的 user text 进入 Pi；不存在 SKILL_START 或专用 AG-UI skill 事件。",
+            maps: ["preflight", "start", "text", "close-text", "finish"],
+            steps: [
+              ...preflight("/skill:review focus on tests"),
+              {
+                from: 2,
+                to: 2,
+                label: "extension 未匹配；input 未消费",
+                patch: { modelActivity: "尚未调用；进入展开阶段" },
+              },
+              {
+                from: 2,
+                to: 2,
+                label: "_expandSkillCommand → user text",
+                patch: {
+                  sdkPrompt:
+                    '<skill name="review" location="/project/skills/review/SKILL.md">\nReferences are relative to /project/skills/review.\n\nReview the project tests.\n</skill>\n\nfocus on tests',
+                },
+              },
+              {
+                from: 2,
+                to: 2,
+                label: "template expansion → model/auth check",
+                patch: { modelActivity: "展开完成；准备普通 agent run" },
+              },
+              {
+                from: 2,
+                to: 3,
+                label: "普通 text_delta / 工具事件链路",
+                patch: {
+                  modelActivity: "模型接收展开后的 user text",
+                  lastEvents: content,
+                },
+              },
+              ...completion,
+            ],
+          },
+          command: {
+            title: "通知型扩展命令：没有普通模型运行也能完成",
+            note: "以已加载的 /mcp 状态命令为例。handler 提前返回；input、skill 和 template 分支不会执行。其他 handler 可以自行发起模型工作。",
+            maps: ["preflight", "start", "notify", "finish"],
+            steps: [
+              ...preflight("/mcp"),
+              {
+                from: 2,
+                to: 2,
+                label: "_tryExecuteExtensionCommand → handler",
+                patch: { modelActivity: "此状态命令无需模型调用" },
+              },
+              {
+                from: 2,
+                to: 3,
+                label: "ctx.ui.notify → ExtensionFeedback",
+                patch: {
+                  lastEvents: [
+                    {
+                      type: "CUSTOM",
+                      name: "pi.notification",
+                      value: {
+                        message: "No MCP servers configured…",
+                        level: "info",
+                      },
+                    },
+                  ],
+                },
+              },
+              {
+                from: 1,
+                to: 3,
+                label: "handler 返回 → prompt resolves → finish",
+                patch: {
+                  lastEvents: [finished],
+                  modelActivity: "普通 user run 未启动；通知只展示",
+                },
+              },
+            ],
+          },
+          handled: {
+            title: "input 处理器消费：可以只有开始和结束",
+            note: "假设没有扩展命令匹配，input 处理器返回 handled 且不通知。普通 user message / 模型 run 不会启动。",
+            maps: ["preflight", "start", "finish"],
+            steps: [
+              ...preflight("A message consumed by an extension."),
+              {
+                from: 2,
+                to: 2,
+                label: "input → handled",
+                patch: { modelActivity: "input 已消费；没有模型调用" },
+              },
+              {
+                from: 1,
+                to: 3,
+                label: "prompt resolves → writer.finish",
+                patch: { lastEvents: [finished] },
+              },
+            ],
+          },
+          extensionError: {
+            title: "扩展异常：HTTP 200 后以 RUN_ERROR 结束",
+            note: "假设某个命令调用了不支持的 setWidget。SDK 捕获 handler 异常并调用 onError；适配器记录错误，不把 prompt 正常返回误判为成功。",
+            maps: ["preflight", "start", "run-error"],
+            steps: [
+              ...preflight("/terminal-only"),
+              {
+                from: 2,
+                to: 3,
+                label: "handler throws → onError",
+                patch: { modelActivity: "普通模型未运行；扩展错误已记录" },
+              },
+              {
+                from: 1,
+                to: 3,
+                label: "writer.finish → writer.fail",
+                patch: {
+                  lastEvents: [
+                    {
+                      type: "RUN_ERROR",
+                      message:
+                        'command:terminal-only (command): Extension UI method "setWidget" is not supported by Pi App. Use the Pi TUI for interactive extension UI.',
+                    },
+                  ],
+                },
+              },
+              {
+                from: 3,
+                to: 0,
+                label: "SSE error → React 错误横幅",
+                patch: { modelActivity: "失败；不是 HTTP 状态码变更" },
+              },
+            ],
+          },
+          historyError: {
+            title: "历史不匹配：SSE 前直接返回 HTTP 错误",
+            note: "输入解析后，历史深比较失败。没有 RUN_STARTED、没有模型调用、也没有 RUN_ERROR；HTTP JSON 错误会由客户端显示。",
+            maps: ["http-error"],
+            steps: [
+              {
+                from: 0,
+                to: 1,
+                label: "POST /api/agent（历史被更改）",
+                patch: { rawPrompt: "/mcp", modelActivity: "未调用" },
+              },
+              {
+                from: 1,
+                to: 1,
+                label: "assertCanonicalHistory throws",
+                patch: { httpStatus: 500 },
+              },
+              {
+                from: 1,
+                to: 0,
+                label: "HTTP JSON error（非 SSE）",
+                patch: {
+                  lastEvents: {
+                    message:
+                      "The AG-UI message history does not match the authoritative Pi session.",
+                  },
+                },
+              },
+            ],
+          },
+          cancel: {
+            title: "取消：HTTP abort 请求与 SSE outcome 分开",
+            note: "abort 返回 204 不等于 AG-UI 流已经结束；独立 HTTP 响应和 SSE 终止的先后不保证。Pi settled 后，writer 使用 aborted 标记生成 cancelled；断线不等于 abort。",
+            maps: ["start", "http-side", "finish"],
+            steps: [
+              ...preflight("Run a long task."),
+              {
+                from: 0,
+                to: 1,
+                label: "POST /api/sessions/:id/abort",
+                patch: { modelActivity: "用户请求取消" },
+              },
+              {
+                from: 1,
+                to: 2,
+                label: "session.abort()",
+                patch: { modelActivity: "等待 SDK 停止活动" },
+              },
+              {
+                from: 2,
+                to: 3,
+                label: "agent_settled: aborted=true",
+                patch: { modelActivity: "writer 记录 aborted=true" },
+              },
+              {
+                from: 1,
+                to: 0,
+                label: "abort HTTP response: 204",
+                patch: { httpStatus: "agent SSE=200；独立 abort=204" },
+              },
+              {
+                from: 1,
+                to: 3,
+                label: "prompt resolves → writer.finish",
+                patch: {
+                  lastEvents: [{ ...finished, outcome: { type: "cancelled" } }],
+                },
+              },
+            ],
+          },
+          image: {
+            title: "图片粘贴：独立 HTTP 上传，返回文件路径",
+            note: "上传不调用 Pi，也不生成 AG-UI 附件消息。保存成功后插入路径；下一次有效提交才通过 /api/agent 发送文字。",
+            maps: ["http-side"],
+            steps: [
+              {
+                from: 0,
+                to: 0,
+                label: "clipboard image → Blob",
+                patch: { draft: "Please inspect", modelActivity: "未调用" },
+              },
+              {
+                from: 0,
+                to: 1,
+                label: "POST /api/clipboard-images（raw PNG）",
+                patch: { httpStatus: "上传中；编辑和发送暂时禁用" },
+              },
+              {
+                from: 1,
+                to: 1,
+                label: "MIME + signature + ≤20 MiB → 0600",
+                patch: { filePath: "/tmp/pi-clipboard-<UUID>.png" },
+              },
+              {
+                from: 1,
+                to: 0,
+                label: "201 JSON { path }",
+                patch: { httpStatus: 201 },
+              },
+              {
+                from: 0,
+                to: 0,
+                label: "插入绝对路径；不自动提交",
+                patch: { draft: "Please inspect /tmp/pi-clipboard-<UUID>.png" },
+              },
+            ],
+          },
+        };
+        const ns = "http://www.w3.org/2000/svg";
+        const svg = document.getElementById("sequence");
+        const controls = document.getElementById("step-controls");
+        let currentScenario = scenarios.text;
+        function element(tag, attrs, text) {
+          const node = document.createElementNS(ns, tag);
+          for (const [name, value] of Object.entries(attrs))
+            node.setAttribute(name, String(value));
+          if (text !== undefined) node.textContent = text;
+          return node;
+        }
+        function showStep(index) {
+          const before = { ...initialState };
+          for (const step of currentScenario.steps.slice(0, index))
+            Object.assign(before, step.patch);
+          const patch = currentScenario.steps[index].patch;
+          const after = { ...before, ...patch };
+          document.getElementById("payload-diff").textContent = Object.entries(
+            patch,
+          )
+            .map(
+              ([key, value]) =>
+                `- ${key}: ${JSON.stringify(before[key])}\n+ ${key}: ${JSON.stringify(value)}`,
+            )
+            .join("\n\n");
+          document.getElementById("payload-state").textContent = JSON.stringify(
+            after,
+            null,
+            2,
+          );
+          for (const [i, button] of [...controls.children].entries()) {
+            button.removeAttribute("aria-current");
+            if (i === index) button.setAttribute("aria-current", "step");
+          }
+          for (const row of svg.querySelectorAll("[data-sequence-step]")) {
+            const selected = Number(row.dataset.sequenceStep) === index;
+            row.setAttribute("opacity", selected ? "1" : ".5");
+          }
+        }
+        function renderSequence() {
+          svg.replaceChildren();
+          controls.replaceChildren();
+          const height = 100 + currentScenario.steps.length * 64;
+          svg.setAttribute("viewBox", `0 0 1120 ${height}`);
+          const title = element("title", {}, currentScenario.title);
+          svg.append(title);
+          const defs = element("defs", {});
+          const marker = element("marker", {
+            id: "sequence-arrow",
+            viewBox: "0 0 10 10",
+            refX: "9",
+            refY: "5",
+            markerWidth: "7",
+            markerHeight: "7",
+            orient: "auto-start-reverse",
+          });
+          marker.append(
+            element("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#81b9ff" }),
+          );
+          defs.append(marker);
+          svg.append(defs);
+          const positions = [130, 390, 650, 910];
+          ["Browser", "HTTP router", "Pi SDK", "AG-UI writer"].forEach(
+            (actor, index) => {
+              svg.append(
+                element(
+                  "text",
+                  {
+                    x: positions[index],
+                    y: 27,
+                    fill: "#e6edf5",
+                    "text-anchor": "middle",
+                    "font-size": "15",
+                  },
+                  actor,
+                ),
+              );
+              svg.append(
+                element("line", {
+                  x1: positions[index],
+                  x2: positions[index],
+                  y1: 45,
+                  y2: height - 15,
+                  stroke: "#35465e",
+                  "stroke-dasharray": "4 5",
+                }),
+              );
+            },
+          );
+          currentScenario.steps.forEach((step, index) => {
+            const y = 88 + index * 64;
+            const from = positions[step.from];
+            const to = positions[step.to];
+            const group = element("g", { "data-sequence-step": index });
+            const self = step.from === step.to;
+            const d = self
+              ? `M ${from} ${y - 14} h 32 v 24 h -32`
+              : `M ${from} ${y} H ${to}`;
+            group.append(
+              element("path", {
+                d,
+                stroke: "#81b9ff",
+                "stroke-width": "2",
+                fill: "none",
+                "marker-end": "url(#sequence-arrow)",
+              }),
+            );
+            group.append(
+              element(
+                "text",
+                {
+                  x: self ? from + 45 : (from + to) / 2,
+                  y: self ? y : y - 10,
+                  fill: "#e6edf5",
+                  "text-anchor": self ? "start" : "middle",
+                  "font-size": "12",
+                },
+                `${index + 1}. ${step.label}`,
+              ),
+            );
+            svg.append(group);
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = `${index + 1}. ${step.label}`;
+            button.addEventListener("click", () => showStep(index));
+            controls.append(button);
+          });
+        }
+        function selectScenario(name) {
+          currentScenario = scenarios[name];
+          document.getElementById("scenario-title").textContent =
+            currentScenario.title;
+          document.getElementById("scenario-note").textContent =
+            currentScenario.note;
+          for (const button of document.querySelectorAll("[data-scenario]"))
+            button.setAttribute(
+              "aria-pressed",
+              String(button.dataset.scenario === name),
+            );
+          for (const row of document.querySelectorAll(".map-row[data-map]"))
+            row.dataset.selected = String(
+              currentScenario.maps.includes(row.dataset.map),
+            );
+          renderSequence();
+          showStep(0);
+        }
+        for (const button of document.querySelectorAll("[data-scenario]"))
+          button.addEventListener("click", () =>
+            selectScenario(button.dataset.scenario),
+          );
+        selectScenario("text");
+      })();
+    </script>
+  </body>
+</html>
