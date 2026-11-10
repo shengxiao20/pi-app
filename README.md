@@ -1,11 +1,38 @@
 # Pi App
 
+> **BREAKING CHANGE:** Pi App moves from **Pi RPC + Tauri desktop app** to **Pi SDK + AG-UI + web**.
+> The current version runs in your browser, not in a native desktop window.
+> To keep the previous desktop app, install a specific older version:
+>
+> ```sh
+> pi install npm:pi-native-app@0.1.15
+> ```
+>
+> The npm package name remains `pi-native-app`.
+> See the [changelog](CHANGELOG.md) for migration details and the refactor summary.
+
 Pi App is a local web client for the [Pi coding agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent).
 It runs the Pi TypeScript SDK inside a Node.js service and streams selected events through AG-UI 1.0.
 It does not launch `pi --mode rpc` or require a native desktop runtime.
 
 **Pi owns model context and persisted history.** The browser owns presentation, drafts, and display-only notifications.
 AG-UI carries runs. Separate HTTP APIs carry workspace, session, history, command discovery, tags, and clipboard images.
+
+## Breaking change: desktop to web
+
+This is an architecture replacement, not an update to the Tauri desktop app.
+The previous app used Pi RPC and a Tauri native desktop runtime.
+The current app runs the Pi TypeScript SDK in a Node.js service and uses AG-UI to stream events to a browser.
+It no longer ships the Tauri runtime, Rust binaries, platform installers, or a Pi RPC launcher.
+
+To keep the old desktop experience, pin an older release with the installation command above.
+To use the current web app, follow [Start here](#start-here).
+
+### Refactor size
+
+The refactor PR reports **+6,490 / -21,101 lines**, for a **net reduction of 14,611 lines**.
+It removes substantially more code than it adds while replacing the native desktop and RPC architecture.
+These figures are PR diff line counts, not a measurement of total source code or runtime performance.
 
 ## Start here
 

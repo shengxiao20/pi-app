@@ -1,6 +1,6 @@
 {
   "name": "pi-native-app",
-  "version": "0.1.15",
+  "version": "0.2.0",
   "description": "AG-UI web client for Pi, backed by the native Pi TypeScript SDK.",
   "license": "MIT",
   "repository": {
@@ -38,7 +38,8 @@
     "desktop/shared/extension-feedback.ts",
     "extensions",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "pi": {
     "extensions": [
