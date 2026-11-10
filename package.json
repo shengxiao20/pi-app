@@ -13,6 +13,9 @@
   "homepage": "https://github.com/shengxiao20/pi-app#readme",
   "private": false,
   "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -28,12 +31,14 @@
     "desktop/dist",
     "desktop/server/agui-adapter.ts",
     "desktop/server/app-store.ts",
+    "desktop/server/clipboard-images.ts",
+    "desktop/server/extension-feedback.ts",
     "desktop/server/index.ts",
     "desktop/server/session-registry.ts",
+    "desktop/shared/extension-feedback.ts",
     "extensions",
     "LICENSE",
-    "README.md",
-    "README_zh.md"
+    "README.md"
   ],
   "pi": {
     "extensions": [
@@ -45,7 +50,7 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "^1.5.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.5.0",
@@ -59,8 +64,8 @@
     "start": "NODE_ENV=production node --experimental-strip-types desktop/server/index.ts",
     "lint": "npm run lint --workspace @pi-app/web",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @pi-app/web",
-    "format": "prettier --write extensions package.json tsconfig.json README.md README_zh.md && npm run format --workspace @pi-app/web",
-    "format:check": "prettier --check extensions package.json tsconfig.json README.md README_zh.md && npm run format:check --workspace @pi-app/web",
+    "format": "prettier --write extensions package.json tsconfig.json README.md && npm run format --workspace @pi-app/web",
+    "format:check": "prettier --check extensions package.json tsconfig.json README.md && npm run format:check --workspace @pi-app/web",
     "prepack": "npm run build"
   }
 }

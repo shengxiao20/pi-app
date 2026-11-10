@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ClipboardEvent as ReactClipboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import "katex/dist/katex.min.css";
@@ -26,6 +27,12 @@ import type {
   SessionProcessEvent,
 } from "./pi-client";
 import { webPiClient } from "./pi-client";
+import { insertClipboardPaths } from "./clipboard";
+import {
+  PI_NOTIFICATION_EVENT,
+  parsePiNotification,
+  type PiNotification,
+} from "../shared/extension-feedback";
 import {
   createWorkspaceState,
   isSessionInteractive,
@@ -58,7 +65,10 @@ type ToolCall = {
   isError: boolean;
   isRunning: boolean;
 };
-type HistoryEntry = ChatMessage | ToolCall;
+type HistoryEntry =
+  | ChatMessage
+  | ToolCall
+  | ({ kind: "notification" } & PiNotification);
 type WorkspaceSession = {
   id: string;
   title: string;
@@ -110,6 +120,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [error, setError] = useState<string>();
   const [draft, setDraft] = useState("");
+  const [pastingImages, setPastingImages] = useState(false);
   const [commands, setCommands] = useState<PiCommand[]>([]);
   const [commandIndex, setCommandIndex] = useState(0);
   const [showCommands, setShowCommands] = useState(false);
@@ -247,6 +258,14 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
       }
       if (event.type === "RUN_ERROR") {
         if (sessionId === activeSessionIdRef.current) setError(event.message);
+        return;
+      }
+      if (event.type === "CUSTOM" && event.name === PI_NOTIFICATION_EVENT) {
+        const notice = parsePiNotification(event.value);
+        updateSession(sessionId, setSessions, (session) => ({
+          ...session,
+          history: [...session.history, { kind: "notification", ...notice }],
+        }));
         return;
       }
       if (event.type === "TEXT_MESSAGE_CONTENT") {
@@ -564,7 +583,10 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
           historyBefore: page.before,
           hasMoreHistory: page.hasMore,
           persistedMessages,
-          history: mapHistory(persistedMessages),
+          history: [
+            ...mapHistory(persistedMessages),
+            ...current.history.filter((entry) => entry.kind === "notification"),
+          ],
         };
       });
     } catch (reason) {
@@ -578,10 +600,58 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
     }
   }
 
+  async function pasteImages(event: ReactClipboardEvent<HTMLTextAreaElement>) {
+    const images = Array.from(event.clipboardData.files).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (!images.length) return;
+    event.preventDefault();
+    if (pastingImages || !isSessionInteractive(activeRuntime)) return;
+    const sessionId = activeSessionId;
+    const textarea = event.currentTarget;
+    const original = textarea.value;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    setPastingImages(true);
+    setShowCommands(false);
+    try {
+      const paths = await Promise.all(
+        images.map((image) => client.saveClipboardImage(image)),
+      );
+      const insertion = insertClipboardPaths(original, start, end, paths);
+      dispatchRuntime({ type: "set-draft", sessionId, draft: insertion.text });
+      if (activeSessionIdRef.current === sessionId) {
+        setDraft(insertion.text);
+        requestAnimationFrame(() => {
+          if (activeSessionIdRef.current !== sessionId) return;
+          textarea.focus();
+          textarea.setSelectionRange(insertion.cursor, insertion.cursor);
+        });
+      }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      dispatchRuntime({
+        type: "set-status",
+        sessionId,
+        status: "failed",
+        error: message,
+      });
+      if (activeSessionIdRef.current === sessionId) setError(message);
+    } finally {
+      setPastingImages(false);
+    }
+  }
+
   async function sendPrompt() {
     const message = draft.trim();
-    if (!message || !activeSession || !isSessionInteractive(activeRuntime))
+    if (
+      !message ||
+      !activeSession ||
+      pastingImages ||
+      !isSessionInteractive(activeRuntime)
+    )
       return;
+    setError(undefined);
     updateSession(activeSession.id, setSessions, (session) => ({
       ...session,
       history: [
@@ -995,18 +1065,26 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
       />
       <section className="workspace">
         <header className="workspace-header">
-          <div>
+          <div className="workspace-title">
             <p className="eyebrow">CONVERSATION</p>
-            <h1>{activeSession?.title || "Connecting to Pi"}</h1>
+            <h1 title={activeSession?.title || "Connecting to Pi"}>
+              {activeSession?.title || "Connecting to Pi"}
+            </h1>
           </div>
-          <button
-            aria-pressed={hideToolCalls}
-            className="tool-visibility-toggle"
-            onClick={() => setHideToolCalls((hidden) => !hidden)}
-            type="button"
+          <div
+            aria-label="Conversation display"
+            className="workspace-toolbar"
+            role="toolbar"
           >
-            {hideToolCalls ? "Show tool calls" : "Hide tool calls"}
-          </button>
+            <label className="tool-visibility-toggle">
+              <input
+                checked={!hideToolCalls}
+                onChange={(event) => setHideToolCalls(!event.target.checked)}
+                type="checkbox"
+              />
+              <span>Show tool calls</span>
+            </label>
+          </div>
         </header>
         {sessionError && <p role="alert">{sessionError}</p>}
         <Conversation
@@ -1037,7 +1115,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
             }
             aria-controls="slash-commands"
             aria-expanded={matchingCommands.length > 0}
-            disabled={!isSessionInteractive(activeRuntime)}
+            disabled={pastingImages || !isSessionInteractive(activeRuntime)}
             id="prompt"
             onChange={(event) => {
               const value = event.target.value;
@@ -1046,6 +1124,7 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
               setShowCommands(value.startsWith("/"));
               if (value.startsWith("/")) void loadCommands();
             }}
+            onPaste={(event) => void pasteImages(event)}
             onKeyDown={(event) => {
               if (
                 event.key === "Enter" &&
@@ -1106,6 +1185,9 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
             </ul>
           )}
           <div className="composer-footer">
+            {pastingImages && (
+              <span role="status">Saving clipboard image…</span>
+            )}
             {sessionStatus === "streaming" ? (
               <button
                 aria-label="Stop generating"
@@ -1121,7 +1203,11 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
               <button
                 aria-label="Send message"
                 className="composer-action composer-send"
-                disabled={!isSessionInteractive(activeRuntime) || !draft.trim()}
+                disabled={
+                  pastingImages ||
+                  !isSessionInteractive(activeRuntime) ||
+                  !draft.trim()
+                }
                 type="submit"
               >
                 <svg aria-hidden="true" viewBox="0 0 16 16">
@@ -1222,7 +1308,7 @@ function Conversation({
       <div className="history">
         {history.map(
           (entry, index) =>
-            (!hideToolCalls || entry.kind === "message") && (
+            (!hideToolCalls || entry.kind !== "tool") && (
               <HistoryEntryView
                 entry={entry}
                 key={historyEntryKey(entry, index)}
@@ -1253,6 +1339,17 @@ function Conversation({
 }
 
 function HistoryEntryView({ entry }: { entry: HistoryEntry }) {
+  if (entry.kind === "notification") {
+    return (
+      <div
+        className={`extension-notification extension-notification-${entry.level}`}
+        role={entry.level === "info" ? "status" : "alert"}
+      >
+        <strong>Pi · {entry.level}</strong>
+        <pre>{entry.message}</pre>
+      </div>
+    );
+  }
   return entry.kind === "message" ? (
     <article className={`message message-${entry.role}`}>
       <span className="message-avatar">
@@ -1335,9 +1432,9 @@ function MermaidDiagram({ chart }: { chart: string }) {
 }
 
 function historyEntryKey(entry: HistoryEntry, index: number): string {
-  return entry.kind === "message"
-    ? `message-${index}`
-    : `tool-${entry.id}-${index}`;
+  return entry.kind === "tool"
+    ? `tool-${entry.id}-${index}`
+    : `${entry.kind}-${index}`;
 }
 
 async function initializeWorkspace(

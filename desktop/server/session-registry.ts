@@ -8,6 +8,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { realpath } from "node:fs/promises";
 import { basename, relative } from "node:path";
+import {
+  ExtensionFeedback,
+  type ExtensionFeedbackEvent,
+} from "./extension-feedback.ts";
 
 const PI_SDK_SPECIFIER =
   process.env.PI_APP_PI_SDK_URL ?? "@earendil-works/pi-coding-agent";
@@ -46,6 +50,7 @@ type ManagedSession = {
   session: AgentSession;
   path: string;
   commands: PiCommand[];
+  feedback: ExtensionFeedback;
 };
 
 export class SessionRegistry {
@@ -114,6 +119,15 @@ export class SessionRegistry {
     return this.#sessions.get(sessionId)!.commands;
   }
 
+  subscribeFeedback(
+    sessionId: string,
+    listener: (event: ExtensionFeedbackEvent) => void,
+  ): () => void {
+    const managed = this.#sessions.get(sessionId);
+    if (!managed) throw new Error(`Session is not open: ${sessionId}`);
+    return managed.feedback.subscribe(listener);
+  }
+
   async rename(sessionId: string, name: string): Promise<void> {
     const normalized = name.trim();
     if (!normalized) throw new Error("Session name cannot be blank.");
@@ -163,7 +177,7 @@ export class SessionRegistry {
 
   async #createAgent(
     manager: SessionManagerType,
-  ): Promise<{ session: AgentSession; commands: PiCommand[] }> {
+  ): Promise<Omit<ManagedSession, "path">> {
     const resourceLoader = new DefaultResourceLoader({
       cwd: this.#cwd,
       agentDir: getAgentDir(),
@@ -184,8 +198,13 @@ export class SessionRegistry {
       settingsManager,
       sessionManager: manager,
     });
-    await session.bindExtensions({});
-    return { session, commands: resourceCommands(resourceLoader) };
+    const feedback = new ExtensionFeedback();
+    await session.bindExtensions({
+      mode: "rpc",
+      uiContext: feedback.uiContext,
+      onError: feedback.onError,
+    });
+    return { session, commands: resourceCommands(resourceLoader), feedback };
   }
 }
 

@@ -3,6 +3,9 @@ import { EventSchema, RunAgentInputSchema } from "@ag-ui/core/schemas";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { PI_NOTIFICATION_EVENT } from "../shared/extension-feedback.ts";
+import type { ExtensionFeedbackEvent } from "./extension-feedback.ts";
 
 export function parseRunInput(value: unknown): RunAgentInput {
   return RunAgentInputSchema.parse(value);
@@ -21,7 +24,7 @@ export function assertCanonicalHistory(
   canonical: Message[],
 ): void {
   const supplied = input.messages.slice(0, -1);
-  if (JSON.stringify(supplied) !== JSON.stringify(canonical)) {
+  if (!isDeepStrictEqual(supplied, canonical)) {
     throw new Error(
       "The AG-UI message history does not match the authoritative Pi session.",
     );
@@ -36,6 +39,7 @@ export class AgUiEventWriter {
   #openToolCalls = new Set<string>();
   #closed = false;
   #aborted = false;
+  #extensionErrors: string[] = [];
 
   constructor(response: ServerResponse, input: RunAgentInput) {
     this.#response = response;
@@ -97,7 +101,23 @@ export class AgUiEventWriter {
     if (event.type === "agent_settled") this.#aborted = event.aborted;
   }
 
+  acceptFeedback(event: ExtensionFeedbackEvent): void {
+    if (event.type === "error") {
+      this.#extensionErrors.push(event.message);
+      return;
+    }
+    this.#write({
+      type: "CUSTOM",
+      name: PI_NOTIFICATION_EVENT,
+      value: { message: event.message, level: event.level },
+    });
+  }
+
   finish(): void {
+    if (this.#extensionErrors.length > 0) {
+      this.fail(new Error(this.#extensionErrors.join("\n")));
+      return;
+    }
     this.#closeTextMessage();
     if (this.#openToolCalls.size > 0) {
       throw new Error(

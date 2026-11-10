@@ -14,6 +14,7 @@ import {
   promptFromInput,
 } from "./agui-adapter.ts";
 import { AppStore } from "./app-store.ts";
+import { saveClipboardImage } from "./clipboard-images.ts";
 import { SessionRegistry, workspaceView } from "./session-registry.ts";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -78,6 +79,11 @@ async function route(
 
   if (request.method === "GET" && url.pathname === "/api/health") {
     sendJson(response, 200, { service: "pi-app", status: "ok" });
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/clipboard-images") {
+    const path = await saveClipboardImage(request);
+    sendJson(response, 201, { path });
     return;
   }
   if (request.method === "GET" && url.pathname === "/api/workspace") {
@@ -159,12 +165,17 @@ async function route(
       const writer = new AgUiEventWriter(response, input);
       const unsubscribe = session.subscribe((event) => writer.accept(event));
       writer.start(input);
+      const unsubscribeFeedback = registry.subscribeFeedback(
+        input.threadId,
+        (event) => writer.acceptFeedback(event),
+      );
       try {
         await session.prompt(prompt);
         writer.finish();
       } catch (reason) {
         writer.fail(reason);
       } finally {
+        unsubscribeFeedback();
         unsubscribe();
       }
     } finally {

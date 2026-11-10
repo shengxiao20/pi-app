@@ -4,9 +4,9 @@
 # Node dependencies and build output
 node_modules/
 dist/
-desktop/dist/
 coverage/
 *.tgz
+*.log
 
 # Environment and local editor state
 .env

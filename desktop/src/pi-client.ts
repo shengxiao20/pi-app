@@ -34,6 +34,7 @@ export type PiCommand = {
 export interface PiClient {
   createSession(): Promise<PersistedSession>;
   currentWorkspace(): Promise<CurrentWorkspace>;
+  saveClipboardImage(image: Blob): Promise<string>;
   runAgent(
     sessionId: string,
     prompt: string,
@@ -65,6 +66,19 @@ export type PersistedSession = {
 export const webPiClient: PiClient = {
   createSession: () => request("/api/sessions", { method: "POST" }),
   currentWorkspace: () => request("/api/workspace"),
+  saveClipboardImage: async (image) => {
+    const result = await request<{ path: string }>("/api/clipboard-images", {
+      method: "POST",
+      headers: { "Content-Type": image.type },
+      body: image,
+    });
+    if (typeof result.path !== "string" || !result.path.startsWith("/")) {
+      throw new Error(
+        "Clipboard image upload did not return an absolute path.",
+      );
+    }
+    return result.path;
+  },
   runAgent: async (sessionId, prompt, handler) => {
     const messages = await request<Message[]>(
       `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
