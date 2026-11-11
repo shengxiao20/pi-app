@@ -1,9 +1,13 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  getPackageDir,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import {
   browserLaunchCommand,
+  hostPiSdkUrl,
   nodeServerArgs,
   serverEntryPath,
 } from "../desktop/server/app-runtime.ts";
@@ -51,7 +55,7 @@ function startServer(cwd: string): void {
     env: {
       ...process.env,
       NODE_ENV: "production",
-      PI_APP_PI_SDK_URL: import.meta.resolve("@earendil-works/pi-coding-agent"),
+      PI_APP_PI_SDK_URL: hostPiSdkUrl(getPackageDir()),
       PI_APP_WORKSPACE: cwd,
       PORT: String(PORT),
     },

@@ -337,7 +337,7 @@ Delayed upload results update the originating session, even after a session swit
 
 There is no attachment preview, automatic image-message conversion, or application-managed expiry.
 Temporary files remain subject to operating system cleanup or manual removal.
-The current image client accepts POSIX absolute paths beginning with `/`; Windows drive-letter paths are not supported.
+The image client accepts POSIX absolute paths, Windows drive-letter paths, and UNC paths.
 
 Sources: [image persistence](desktop/server/clipboard-images.ts),
 [paste helpers](desktop/src/clipboard.ts), and [image client](desktop/src/pi-client.ts).
@@ -434,6 +434,12 @@ PI_APP_WORKSPACE=/absolute/path/to/project npm run dev
 Pi controls model credentials and resource configuration. Pi App does not add a web login or model-settings interface.
 Source: [server initialization](desktop/server/index.ts) and [SDK import](desktop/server/session-registry.ts).
 
+`/app` gets the host Pi package directory through `getPackageDir()`.
+It reads `exports["."].import` from the host `package.json` and passes an encoded `file:` URL to the server.
+This avoids SDK lookup from the extension's managed npm directory, including on Windows.
+Missing manifests or SDK entries throw before the server starts.
+Source: [launcher](extensions/app.ts) and [SDK resolution helpers](desktop/server/app-runtime.ts).
+
 ## Local security boundary
 
 The service binds only to IPv4 loopback, `127.0.0.1`.
@@ -477,27 +483,30 @@ npm pack --dry-run
 It requires the host Pi SDK through its peer dependency.
 It does not include Tauri, Rust binaries, platform installers, or a Pi RPC launcher.
 
-| File or directory                      | Responsibility                                      |
-| -------------------------------------- | --------------------------------------------------- |
-| `extensions/app.ts`                    | Pi `/app` launcher                                  |
-| `desktop/server/index.ts`              | HTTP routing, SSE lifecycle, static serving         |
-| `desktop/server-build/index.js`        | JavaScript server entry for npm-installed packages  |
-| `desktop/server/app-runtime.ts`        | Cross-platform package and process launch helpers   |
-| `desktop/server/path-safety.ts`        | Platform-aware filesystem containment checks        |
-| `desktop/server/agui-adapter.ts`       | Input/history checks and event translation          |
-| `desktop/server/session-registry.ts`   | Pi session lifecycle, resources, canonical messages |
-| `desktop/server/workspace-access.ts`   | Exclusive workspace changes and request guards      |
-| `desktop/server/workspace-picker.ts`   | Native macOS and Windows folder dialogs             |
-| `desktop/server/extension-feedback.ts` | Extension notifications and explicit UI errors      |
-| `desktop/server/clipboard-images.ts`   | Validated temporary image persistence               |
-| `desktop/server/app-store.ts`          | Tags and assignments                                |
-| `desktop/shared/extension-feedback.ts` | Shared notification contract                        |
-| `desktop/shared/filesystem-path.ts`    | POSIX, drive, and UNC path validation               |
-| `desktop/src/pi-client.ts`             | HTTP APIs and AG-UI client                          |
-| `desktop/src/App.tsx`                  | Conversation, composer, and session controls        |
-| `desktop/src/workspace-state.ts`       | Per-session runtime state                           |
-| `desktop/src/clipboard.ts`             | Draft path insertion                                |
-| `desktop/public/pi-agui-map.html`      | Offline event map and scenarios                     |
+| File or directory                               | Responsibility                                           |
+| ----------------------------------------------- | -------------------------------------------------------- |
+| `extensions/app.ts`                             | Pi `/app` launcher                                       |
+| `desktop/server/index.ts`                       | HTTP routing, SSE lifecycle, static serving              |
+| `desktop/server-build/index.js`                 | JavaScript server entry for npm-installed packages       |
+| `desktop/server/app-runtime.ts`                 | Cross-platform package and process launch helpers        |
+| `desktop/server/path-safety.ts`                 | Platform-aware filesystem containment checks             |
+| `desktop/server/agui-adapter.ts`                | Input/history checks and event translation               |
+| `desktop/server/session-registry.ts`            | Pi session lifecycle, resources, canonical messages      |
+| `desktop/server/workspace-access.ts`            | Exclusive workspace changes and request guards           |
+| `desktop/server/workspace-picker.ts`            | Native macOS and Windows folder dialogs                  |
+| `desktop/server/extension-feedback.ts`          | Extension notifications and explicit UI errors           |
+| `desktop/server/clipboard-images.ts`            | Validated temporary image persistence                    |
+| `desktop/server/app-store.ts`                   | Tags and assignments                                     |
+| `desktop/shared/extension-feedback.ts`          | Shared notification contract                             |
+| `desktop/shared/filesystem-path.ts`             | POSIX, drive, and UNC path validation                    |
+| `desktop/src/pi-client.ts`                      | HTTP APIs and AG-UI client                               |
+| `desktop/src/App.tsx`                           | Page coordination, workspace/session state, and composer |
+| `desktop/src/conversation/Conversation.tsx`     | Markdown history, tool results, and Mermaid diagrams     |
+| `desktop/src/workspace/WorkspaceNavigation.tsx` | Workspace navigation, tags, and session list             |
+| `desktop/src/workspace/types.ts`                | Shared workspace UI types                                |
+| `desktop/src/workspace-state.ts`                | Per-session runtime state                                |
+| `desktop/src/clipboard.ts`                      | Draft path insertion                                     |
+| `desktop/public/pi-agui-map.html`               | Offline event map and scenarios                          |
 
 ## Troubleshooting
 

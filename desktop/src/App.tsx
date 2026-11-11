@@ -1,8 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useId,
-  useLayoutEffect,
   useReducer,
   useRef,
   useState,
@@ -10,13 +8,6 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import "katex/dist/katex.min.css";
-import mermaid from "mermaid";
-
-import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 
 import type {
   PersistedSession,
@@ -31,66 +22,29 @@ import { insertClipboardPaths } from "./clipboard";
 import {
   PI_NOTIFICATION_EVENT,
   parsePiNotification,
-  type PiNotification,
 } from "../shared/extension-feedback";
+import Conversation from "./conversation/Conversation";
+import type { ChatStatus, HistoryEntry } from "./conversation/types";
 import {
   canCreateSession,
   createWorkspaceState,
   isSessionInteractive,
   workspaceReducer,
 } from "./workspace-state";
+import type {
+  ContextMenu,
+  RenameTarget,
+  WorkspaceSession,
+} from "./workspace/types";
+import WorkspaceNavigation from "./workspace/WorkspaceNavigation";
 
-export type ChatStatus =
-  | "idle"
-  | "starting"
-  | "ready"
-  | "streaming"
-  | "completed"
-  | "aborted"
-  | "failed";
-
-mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
-
-type ChatMessage = {
-  kind: "message";
-  role: "user" | "assistant";
-  text: string;
-};
-type ToolCall = {
-  kind: "tool";
-  id: string;
-  name: string;
-  target?: string;
-  argumentsJson: string;
-  output: string;
-  isError: boolean;
-  isRunning: boolean;
-};
-type HistoryEntry =
-  | ChatMessage
-  | ToolCall
-  | ({ kind: "notification" } & PiNotification);
-type WorkspaceSession = {
-  id: string;
-  title: string;
-  sessionPath: string;
-  historyLoaded: boolean;
-  historyLoading: boolean;
-  historyBefore: number;
-  hasMoreHistory: boolean;
-  persistedMessages: DataRecord[];
-  history: HistoryEntry[];
-};
+export type { ChatStatus } from "./conversation/types";
 type WorkspaceInitialization = {
   id: string;
   activeSession?: WorkspaceSession;
   directory: string;
   sessions: WorkspaceSession[];
 };
-type RenameTarget =
-  | { kind: "tag"; tag: Tag }
-  | { kind: "session"; session: WorkspaceSession };
-type ContextMenu = { kind: "tag"; tag: Tag; x: number; y: number };
 type PiCommand = {
   name: string;
   description?: string;
@@ -941,245 +895,50 @@ export default function App({ client = webPiClient }: { client?: PiClient }) {
             )}
           </section>
         </div>
-        <nav
-          aria-busy={changingWorkspace}
-          aria-label="Workspace navigation"
-          className="workspace-navigation"
-          inert={changingWorkspace}
-        >
-          <button
-            className="new-session"
-            disabled={
-              changingWorkspace || !canCreateSession(status, activeRuntime)
-            }
-            onClick={() => void createSession()}
-            type="button"
-          >
-            <span aria-hidden="true">+</span> New chat
-          </button>
-          <section
-            className="workspace-heading"
-            aria-labelledby="workspace-heading"
-          >
-            <h2 id="workspace-heading">Workspace</h2>
-            <div className="workspace-path-row">
-              <p className="current-directory" title={directory}>
-                {directory || "No workspace selected"}
-              </p>
-              <button
-                aria-label="Choose workspace directory"
-                className="choose-workspace"
-                disabled={changingWorkspace}
-                onClick={() => void chooseWorkspace()}
-                title={
-                  changingWorkspace
-                    ? "Choosing workspace…"
-                    : "Choose workspace directory"
-                }
-                type="button"
-              >
-                <FolderIcon />
-              </button>
-            </div>
-          </section>
-          <section
-            className="navigation-section recents"
-            aria-labelledby="recents-heading"
-          >
-            <div className="tag-list-heading">
-              <h2 id="recents-heading">Tags</h2>
-              <button
-                aria-label="Create tag"
-                aria-expanded={creatingTag}
-                className="create-tag"
-                onClick={() => setCreatingTag(true)}
-                type="button"
-              >
-                <PlusIcon />
-              </button>
-            </div>
-            <div className="session-list">
-              {creatingTag && (
-                <form
-                  className="new-tag-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void createTag();
-                  }}
-                >
-                  <label className="sr-only" htmlFor="new-tag-name">
-                    New tag name
-                  </label>
-                  <input
-                    autoFocus
-                    id="new-tag-name"
-                    onChange={(event) => setNewTagName(event.target.value)}
-                    placeholder="New tag"
-                    value={newTagName}
-                  />
-                  <button aria-label="Add tag" type="submit">
-                    <PlusIcon />
-                  </button>
-                  <button
-                    aria-label="Cancel new tag"
-                    onClick={() => {
-                      setNewTagName("");
-                      setCreatingTag(false);
-                    }}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </form>
-              )}
-              {!sessions.length && (
-                <p className="empty-projects">No sessions in this workspace.</p>
-              )}
-              {groupedSessions(tags, assignments, sessions).map((group) => (
-                <section
-                  className={`tag-group${
-                    dropTargetGroupId === group.id ? " is-drop-target" : ""
-                  }`}
-                  data-tag-group-id={group.id}
-                  data-tag-id={group.tag?.id}
-                  key={group.id}
-                >
-                  <div
-                    className="tag-row"
-                    onContextMenu={(event) => {
-                      if (!group.tag) return;
-                      event.preventDefault();
-                      setContextMenu({
-                        kind: "tag",
-                        tag: group.tag,
-                        x: event.clientX,
-                        y: event.clientY,
-                      });
-                    }}
-                  >
-                    {renameTarget?.kind === "tag" &&
-                    renameTarget.tag.id === group.tag?.id ? (
-                      <input
-                        aria-label={`Rename tag ${group.name}`}
-                        autoFocus
-                        className="inline-rename"
-                        onBlur={() => void saveRename()}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") void saveRename();
-                          if (event.key === "Escape")
-                            setRenameTarget(undefined);
-                        }}
-                        value={renameValue}
-                      />
-                    ) : (
-                      <button
-                        aria-expanded={expandedTags.has(group.id)}
-                        aria-label={`${expandedTags.has(group.id) ? "Collapse" : "Expand"} ${group.name}`}
-                        className="tag-toggle"
-                        onClick={() =>
-                          setExpandedTags((current) => {
-                            const next = new Set(current);
-                            if (next.has(group.id)) next.delete(group.id);
-                            else next.add(group.id);
-                            return next;
-                          })
-                        }
-                        type="button"
-                      >
-                        <span aria-hidden="true">
-                          {expandedTags.has(group.id) ? "⌄" : "›"}
-                        </span>
-                        {group.name}
-                      </button>
-                    )}
-                  </div>
-                  {expandedTags.has(group.id) &&
-                    group.sessions.map((session) => (
-                      <div className="session-item" key={session.id}>
-                        <button
-                          aria-current={
-                            session.id === activeSessionId ? "page" : undefined
-                          }
-                          className="session-select"
-                          onPointerDown={(event) =>
-                            beginPointerDrag(event, session.id)
-                          }
-                          onClick={() => void selectSession(session)}
-                          type="button"
-                        >
-                          <StatusIcon
-                            status={
-                              runtimeState.sessions[session.id]?.status ??
-                              "idle"
-                            }
-                          />
-                          <span className="session-copy">
-                            {renameTarget?.kind === "session" &&
-                            renameTarget.session.id === session.id ? (
-                              <input
-                                aria-label={`Rename session ${session.title}`}
-                                autoFocus
-                                className="inline-rename"
-                                onBlur={() => void saveRename()}
-                                onChange={(event) =>
-                                  setRenameValue(event.target.value)
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") void saveRename();
-                                  if (event.key === "Escape")
-                                    setRenameTarget(undefined);
-                                }}
-                                onClick={(event) => event.stopPropagation()}
-                                value={renameValue}
-                              />
-                            ) : (
-                              <strong>{session.title}</strong>
-                            )}
-                            {runtimeState.sessions[session.id]?.unread && (
-                              <span
-                                aria-label="Unread updates"
-                                className="session-unread"
-                              />
-                            )}
-                            <small>
-                              {lastMessageText(session.history) ||
-                                "Empty conversation"}
-                            </small>
-                          </span>
-                        </button>
-                        <div className="session-actions">
-                          <button
-                            aria-label={`Rename session ${session.title}`}
-                            className="rename-session"
-                            onClick={() =>
-                              beginRename({ kind: "session", session })
-                            }
-                            type="button"
-                          >
-                            <svg
-                              aria-hidden="true"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              xmlns="http://www.w3.org/2000/svg"
-                            >
-                              <path
-                                d="m4 16.5-.5 4 4-.5L19 8.5 15.5 5 4 16.5Z"
-                                stroke="currentColor"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="1.7"
-                              />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                </section>
-              ))}
-            </div>
-          </section>
-        </nav>
+        <WorkspaceNavigation
+          state={{
+            changingWorkspace,
+            canCreateSession: canCreateSession(status, activeRuntime),
+            directory,
+            sessions,
+            tags,
+            assignments,
+            runtimeSessions: runtimeState.sessions,
+            activeSessionId,
+            creatingTag,
+            newTagName,
+            expandedTags,
+            dropTargetGroupId,
+            renameTarget,
+            renameValue,
+          }}
+          actions={{
+            createSession: () => void createSession(),
+            chooseWorkspace: () => void chooseWorkspace(),
+            startTagCreation: () => setCreatingTag(true),
+            createTag: () => void createTag(),
+            cancelTagCreation: () => {
+              setNewTagName("");
+              setCreatingTag(false);
+            },
+            changeNewTagName: setNewTagName,
+            toggleTag: (groupId) =>
+              setExpandedTags((current) => {
+                const next = new Set(current);
+                if (next.has(groupId)) next.delete(groupId);
+                else next.add(groupId);
+                return next;
+              }),
+            setTagContextMenu: (tag, x, y) =>
+              setContextMenu({ kind: "tag", tag, x, y }),
+            selectSession: (session) => void selectSession(session),
+            beginPointerDrag,
+            beginRename,
+            saveRename: () => void saveRename(),
+            changeRenameValue: setRenameValue,
+            cancelRename: () => setRenameTarget(undefined),
+          }}
+        />
       </aside>
       <button
         aria-label="Resize sidebar"
@@ -1395,190 +1154,6 @@ function matchCommands(commands: PiCommand[], draft: string): PiCommand[] {
   return commands.filter(({ name }) => name.toLowerCase().includes(query));
 }
 
-function Conversation({
-  history,
-  status,
-  hasMoreHistory,
-  historyLoading,
-  hideToolCalls,
-  onLoadOlder,
-}: {
-  history: HistoryEntry[];
-  status: ChatStatus;
-  hasMoreHistory: boolean;
-  historyLoading: boolean;
-  hideToolCalls: boolean;
-  onLoadOlder: () => void;
-}) {
-  const conversation = useRef<HTMLElement>(null);
-  const positionedAtLatest = useRef(false);
-
-  useLayoutEffect(() => {
-    if (historyLoading || !history.length || positionedAtLatest.current) return;
-    conversation.current!.scrollTop = conversation.current!.scrollHeight;
-    positionedAtLatest.current = true;
-  }, [history.length, historyLoading]);
-
-  return (
-    <section
-      aria-label="Conversation"
-      className="conversation"
-      ref={conversation}
-    >
-      {!history.length && !historyLoading && status !== "starting" && (
-        <div className="empty-state">
-          <span className="empty-orb">✦</span>
-          <h2>What can I help you build?</h2>
-          <p>
-            Ask Pi to explore this project, implement a feature, or review a
-            change.
-          </p>
-        </div>
-      )}
-      {hasMoreHistory && (
-        <button
-          className="load-older-history"
-          disabled={historyLoading}
-          onClick={onLoadOlder}
-          type="button"
-        >
-          {historyLoading
-            ? "Loading earlier messages…"
-            : "Load earlier messages"}
-        </button>
-      )}
-      <div className="history">
-        {history.map(
-          (entry, index) =>
-            (!hideToolCalls || entry.kind !== "tool") && (
-              <HistoryEntryView
-                entry={entry}
-                key={historyEntryKey(entry, index)}
-              />
-            ),
-        )}
-      </div>
-      {historyLoading && (
-        <div
-          aria-label="Loading latest history"
-          className="thinking-indicator"
-          role="status"
-        >
-          <span aria-hidden="true" /> Loading latest history…
-        </div>
-      )}
-      {status === "streaming" && (
-        <div
-          aria-label="Pi is working"
-          className="thinking-indicator"
-          role="status"
-        >
-          <span aria-hidden="true" /> Pi is working…
-        </div>
-      )}
-    </section>
-  );
-}
-
-function HistoryEntryView({ entry }: { entry: HistoryEntry }) {
-  if (entry.kind === "notification") {
-    return (
-      <div
-        className={`extension-notification extension-notification-${entry.level}`}
-        role={entry.level === "info" ? "status" : "alert"}
-      >
-        <strong>Pi · {entry.level}</strong>
-        <pre>{entry.message}</pre>
-      </div>
-    );
-  }
-  return entry.kind === "message" ? (
-    <article className={`message message-${entry.role}`}>
-      <span className="message-avatar">
-        {entry.role === "user" ? "You" : "π"}
-      </span>
-      <div>
-        <strong>{entry.role === "user" ? "You" : "Pi"}</strong>
-        <div className="markdown">
-          <ReactMarkdown
-            components={{
-              code({ children, className, ...props }) {
-                const language = /language-(\S+)/.exec(className ?? "")?.[1];
-                if (language === "mermaid")
-                  return <MermaidDiagram chart={String(children).trim()} />;
-                return (
-                  <code className={className} {...props}>
-                    {children}
-                  </code>
-                );
-              },
-            }}
-            rehypePlugins={[rehypeKatex]}
-            remarkPlugins={[remarkGfm, remarkMath]}
-          >
-            {normalizeMarkdown(normalizeMath(entry.text))}
-          </ReactMarkdown>
-        </div>
-      </div>
-    </article>
-  ) : (
-    <details
-      className={`tool ${entry.isError ? "tool-error" : "tool-success"}`}
-    >
-      <summary>
-        <span aria-hidden="true">⌘</span>
-        <span>{entry.name}</span>
-        {entry.target && <code>{entry.target}</code>}
-        <em>
-          {entry.isRunning ? "running" : entry.isError ? "failed" : "completed"}
-        </em>
-      </summary>
-      <pre>{entry.output || "Running…"}</pre>
-    </details>
-  );
-}
-
-function MermaidDiagram({ chart }: { chart: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const diagramId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-
-  useEffect(() => {
-    let disposed = false;
-    const container = containerRef.current;
-    if (!container) return;
-
-    container.replaceChildren();
-    void mermaid
-      .render(`mermaid-${diagramId}`, chart)
-      .then(({ svg, bindFunctions }) => {
-        if (disposed || !containerRef.current) return;
-        containerRef.current.innerHTML = svg;
-        bindFunctions?.(containerRef.current);
-      })
-      .catch((error: unknown) =>
-        console.error("Could not render Mermaid diagram", error),
-      );
-
-    return () => {
-      disposed = true;
-    };
-  }, [chart, diagramId]);
-
-  return (
-    <div
-      aria-label="Mermaid diagram"
-      className="mermaid-diagram"
-      ref={containerRef}
-    />
-  );
-}
-
-function historyEntryKey(entry: HistoryEntry, index: number): string {
-  return entry.kind === "tool"
-    ? `tool-${entry.id}-${index}`
-    : `${entry.kind}-${index}`;
-}
-
 async function initializeWorkspace(
   client: PiClient,
 ): Promise<WorkspaceInitialization> {
@@ -1604,51 +1179,6 @@ async function initializeWorkspace(
   };
 }
 
-function StatusIcon({ status }: { status: string }) {
-  const label = `Session status: ${status}`;
-  if (status === "streaming" || status === "starting")
-    return (
-      <svg
-        aria-label={label}
-        className="session-status is-running"
-        viewBox="0 0 16 16"
-      >
-        <path d="M5 3.5 12 8l-7 4.5Z" />
-      </svg>
-    );
-  if (status === "completed")
-    return (
-      <svg
-        aria-label={label}
-        className="session-status is-completed"
-        viewBox="0 0 16 16"
-      >
-        <path d="m3.5 8 2.7 2.7 6.3-6.1" />
-      </svg>
-    );
-  if (status === "failed")
-    return (
-      <svg
-        aria-label={label}
-        className="session-status is-failed"
-        viewBox="0 0 16 16"
-      >
-        <path d="M4 4l8 8m0-8-8 8" />
-      </svg>
-    );
-  if (status === "aborted")
-    return (
-      <svg
-        aria-label={label}
-        className="session-status is-aborted"
-        viewBox="0 0 16 16"
-      >
-        <path d="M5 5h6v6H5z" />
-      </svg>
-    );
-  return <span aria-label={label} className="session-status is-idle" />;
-}
-
 function sidebarMaximum(viewportWidth: number): number {
   return Math.max(
     MIN_SIDEBAR_WIDTH,
@@ -1660,23 +1190,6 @@ function clampSidebarWidth(width: number, viewportWidth: number): number {
   return Math.min(
     sidebarMaximum(viewportWidth),
     Math.max(MIN_SIDEBAR_WIDTH, width),
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16">
-      <path d="M8 3v10M3 8h10" />
-    </svg>
-  );
-}
-
-function FolderIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20">
-      <path d="M2.5 5.25A1.75 1.75 0 0 1 4.25 3.5h4l1.75 2h5.75A1.75 1.75 0 0 1 17.5 7.25v7.5a1.75 1.75 0 0 1-1.75 1.75h-11A2.25 2.25 0 0 1 2.5 14.25z" />
-      <path d="M2.75 8h14" />
-    </svg>
   );
 }
 
@@ -1695,37 +1208,6 @@ function terminalStatusForEvent(event: DataRecord): string | undefined {
     return outcome?.type === "cancelled" ? "aborted" : "completed";
   }
   return undefined;
-}
-
-function groupedSessions(
-  tags: Tag[],
-  assignments: SessionTagAssignment[],
-  sessions: WorkspaceSession[],
-): { id: string; name: string; tag?: Tag; sessions: WorkspaceSession[] }[] {
-  const tagBySession = new Map(
-    assignments.map((item) => [item.sessionId, item.tagId]),
-  );
-  const groups = [
-    ...tags.map((tag) => ({
-      id: String(tag.id),
-      name: tag.name,
-      tag,
-      sessions: [] as WorkspaceSession[],
-    })),
-    {
-      id: "uncategorized",
-      name: "Uncategorized",
-      sessions: [] as WorkspaceSession[],
-    },
-  ];
-  const byId = new Map(groups.map((group) => [group.id, group]));
-  for (const session of sessions) {
-    const group = byId.get(
-      String(tagBySession.get(session.id) ?? "uncategorized"),
-    );
-    (group ?? groups.at(-1)!).sessions.push(session);
-  }
-  return groups;
 }
 
 function workspaceSession(session: PersistedSession): WorkspaceSession {
@@ -1820,41 +1302,6 @@ function mapHistory(messages: unknown[]): HistoryEntry[] {
   }
   return history;
 }
-function normalizeMath(text: string): string {
-  return text
-    .replace(/\\\[([\s\S]*?)\\\]/g, "$$\n$1\n$$")
-    .replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$$");
-}
-
-function normalizeMarkdown(text: string): string {
-  const delimiter = /\|(?:\s*:?-{3,}:?\s*\|)+/;
-  const match = delimiter.exec(text);
-  if (!match) return text;
-
-  const tableStart = text.lastIndexOf("\n", match.index) + 1;
-  const beforeTable = text.slice(0, tableStart);
-  const flattenedTable = text.slice(tableStart).trim();
-  if (flattenedTable.includes("\n")) return text;
-
-  const columnCount = match[0].split("|").filter(Boolean).length;
-  const cells = flattenedTable
-    .split("|")
-    .map((cell) => cell.trim())
-    .filter(Boolean);
-  if (cells.length < columnCount * 2) return text;
-
-  const rows = cells
-    .filter((_, index) => index < columnCount || index >= columnCount * 2)
-    .reduce<string[]>((result, cell, index) => {
-      if (index % columnCount === 0) result.push("");
-      result[result.length - 1] += `| ${cell} `;
-      return result;
-    }, [])
-    .map((row) => `${row}|`);
-
-  return `${beforeTable}${rows[0]}\n${match[0]}\n${rows.slice(1).join("\n")}`;
-}
-
 function messageText(content: unknown): string {
   if (typeof content === "string") return content;
   return Array.isArray(content)
@@ -1872,13 +1319,6 @@ function updateSession(
   setSessions((current) =>
     current.map((session) => (session.id === id ? update(session) : session)),
   );
-}
-function lastMessageText(history: HistoryEntry[]): string | undefined {
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (entry.kind === "message") return entry.text;
-  }
-  return undefined;
 }
 function appendAssistantText(
   history: HistoryEntry[],

@@ -7,6 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import mermaid from "mermaid";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -99,7 +100,10 @@ function createClient() {
 }
 
 describe("App web workspace", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
 
   it("renders persisted Markdown without changing the page renderer", async () => {
     const fake = createClient();
@@ -122,6 +126,34 @@ describe("App web workspace", () => {
 
     expect(await screen.findByRole("table")).toBeTruthy();
     expect(screen.getByRole("cell", { name: "Web protocol" })).toBeTruthy();
+    expect(mermaid.initialize).not.toHaveBeenCalled();
+  });
+
+  it("loads Mermaid on demand for Mermaid code blocks", async () => {
+    const fake = createClient();
+    fake.client.sessionHistory = vi.fn().mockResolvedValue({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "```mermaid\nflowchart TD\n  A --> B\n```",
+            },
+          ],
+        },
+      ],
+      before: 0,
+      hasMore: false,
+    });
+    render(<App client={fake.client} />);
+
+    expect(await screen.findByLabelText("Mermaid diagram")).toBeTruthy();
+    await waitFor(() => expect(mermaid.render).toHaveBeenCalled());
+    expect(mermaid.initialize).toHaveBeenCalledWith({
+      startOnLoad: false,
+      securityLevel: "strict",
+    });
   });
 
   it("loads the current workspace and session history by session ID", async () => {

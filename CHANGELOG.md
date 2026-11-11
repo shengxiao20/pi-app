@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.2.1 (unreleased)
+## 0.2.2 (unreleased)
+
+### Fixes and performance
+
+- Resolve the host Pi SDK through its package directory and declared ESM export. Fail before server launch when the manifest or SDK entry is missing, including on Windows drive and UNC paths.
+- Load Mermaid only when a conversation renders a Mermaid code block, reducing the initial JavaScript payload.
+
+## 0.2.1 (2026-11-10)
 
 ### Native workspace selection
 

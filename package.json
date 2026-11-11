@@ -1,6 +1,6 @@
 {
   "name": "pi-native-app",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "AG-UI web client for Pi, backed by the native Pi TypeScript SDK.",
   "license": "MIT",
   "repository": {

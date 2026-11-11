@@ -1,7 +1,18 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment node
+
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   browserLaunchCommand,
+  hostPiSdkUrl,
   nodeServerArgs,
+  piSdkEntryUrl,
   serverEntryPath,
 } from "./app-runtime.ts";
 
@@ -50,6 +61,130 @@ describe("extension runtime paths", () => {
       serverSource,
     ]);
     expect(nodeServerArgs(serverBundle)).toEqual([serverBundle]);
+  });
+});
+
+describe("Pi SDK entry URLs", () => {
+  it.each([
+    {
+      platform: "darwin",
+      packageDir: "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent",
+      expected:
+        "file:///usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+    },
+    {
+      platform: "linux",
+      packageDir: "/opt/Pi #1% 中文",
+      expected: "file:///opt/Pi%20%231%25%20%E4%B8%AD%E6%96%87/dist/index.js",
+    },
+    {
+      platform: "win32",
+      packageDir:
+        "C:\\Program Files\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent",
+      expected:
+        "file:///C:/Program%20Files/nodejs/node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+    },
+    {
+      platform: "win32",
+      packageDir: "D:\\Pi #1% 中文",
+      expected: "file:///D:/Pi%20%231%25%20%E4%B8%AD%E6%96%87/dist/index.js",
+    },
+    {
+      platform: "win32",
+      packageDir: "\\\\server\\shared apps\\Pi #1% 中文",
+      expected:
+        "file://server/shared%20apps/Pi%20%231%25%20%E4%B8%AD%E6%96%87/dist/index.js",
+    },
+    {
+      platform: "win32",
+      packageDir: "C:/Users/test/AppData/Roaming/npm/node_modules/pi",
+      expected:
+        "file:///C:/Users/test/AppData/Roaming/npm/node_modules/pi/dist/index.js",
+    },
+  ])(
+    "encodes $platform package path $packageDir",
+    ({ platform, packageDir, expected }) => {
+      expect(piSdkEntryUrl(packageDir, "./dist/index.js", platform)).toBe(
+        expected,
+      );
+    },
+  );
+});
+
+describe("host Pi SDK resolution", () => {
+  let root: string;
+  let packageDir: string;
+  let entryPath: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "pi-app-sdk-"));
+    packageDir = join(root, "host Pi #1% 中文");
+    entryPath = join(packageDir, "sdk", "entry #1%.js");
+    mkdirSync(join(packageDir, "sdk"), { recursive: true });
+    writeFileSync(
+      join(packageDir, "package.json"),
+      JSON.stringify({
+        name: "@earendil-works/pi-coding-agent",
+        type: "module",
+        exports: { ".": { import: "./sdk/entry #1%.js" } },
+      }),
+    );
+    writeFileSync(entryPath, 'export const source = "host-sdk";');
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("uses the host manifest export instead of a fixed dist entry", () => {
+    expect(hostPiSdkUrl(packageDir)).toBe(pathToFileURL(entryPath).href);
+  });
+
+  it("loads the host SDK from a separate managed extension directory", () => {
+    const extensionDir = join(root, "managed", "node_modules", "pi-native-app");
+    mkdirSync(extensionDir, { recursive: true });
+    const extensionRequire = createRequire(join(extensionDir, "app.js"));
+    expect(() =>
+      extensionRequire.resolve("@earendil-works/pi-coding-agent"),
+    ).toThrow("Cannot find module");
+
+    const output = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        "const sdk = await import(process.env.PI_APP_PI_SDK_URL); process.stdout.write(sdk.source);",
+      ],
+      {
+        cwd: extensionDir,
+        env: { ...process.env, PI_APP_PI_SDK_URL: hostPiSdkUrl(packageDir) },
+        encoding: "utf8",
+      },
+    );
+    expect(output).toBe("host-sdk");
+  });
+
+  it("throws when the host package manifest is missing", () => {
+    rmSync(join(packageDir, "package.json"));
+    expect(() => hostPiSdkUrl(packageDir)).toThrow("ENOENT");
+  });
+
+  it("throws when the host package manifest is invalid", () => {
+    writeFileSync(join(packageDir, "package.json"), "{");
+    expect(() => hostPiSdkUrl(packageDir)).toThrow(SyntaxError);
+  });
+
+  it("throws when the host package has no ESM export", () => {
+    writeFileSync(
+      join(packageDir, "package.json"),
+      JSON.stringify({ exports: {} }),
+    );
+    expect(() => hostPiSdkUrl(packageDir)).toThrow(TypeError);
+  });
+
+  it("throws when the exported SDK entry is missing", () => {
+    rmSync(entryPath);
+    expect(() => hostPiSdkUrl(packageDir)).toThrow("ENOENT");
   });
 });
 
